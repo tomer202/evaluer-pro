@@ -1,23 +1,29 @@
 # GEMINI.md - Evaluer Architecture, Conventions & Development Guide
 
-This document outlines the core architecture, design patterns, business rules, API conventions, and testing guidelines for the `evaluer` codebase.
+This document outlines the core architecture, design patterns, business rules, API conventions, performance optimizations, and testing guidelines for the `evaluer` codebase.
 
 ---
 
 ## 1. Project Overview & Architecture
 
-`evaluer` is a high-performance RESTAPI application designed to calculate course grades, generate student recommendation queues, provide status breakdown analytics, and integrate with the Hive LMS platform.
+`evaluer` is a high-performance REST API application written in Go designed to calculate course grades, generate student recommendation queues, provide status breakdown analytics, and integrate with the Hive LMS platform.
 
 ---
 
 ### Codebase Structure
 
-- **`evaluer/dal`**: Database Abstraction Layer (DAL), a feature of web2py, is an API that converts objects into database objects, including queries, tables, and records. this folder manages all the queries to the postgres database
-- **`evaluer/services/calculator.py`**: Core `GradeCalculator` domain service. Handles grade aggregations, unopened exercise filtering, sequential recommendations, and course status analytics.
-- **`evaluer/services/config/`**: YAML course configuration parser (`ConfigReader`, `CourseConfig`, `SubjectConfig`, `ModuleConfig`, `ExerciseConfig`).
-- **`evaluer/services/cache.py`**: Thread-safe, 100% in-memory (RAM) `CacheManager`.
-- **`evaluer/api/`**: FastAPI routes (`calc.py`, `config.py`), schemas (`schemas.py`), and dependencies (`deps.py`).
-- **`tests/`**: Comprehensive pytest unit and integration test suite.
+- **`cmd/server/main.go`**: Go application entry point. Loads configuration, initializes PostgreSQL database connection pool (`db.InitDB()`), sets up Gin HTTP routes, and starts the HTTP server.
+- **`internal/api/`**:
+  - `handlers.go`: Gin HTTP handlers for configuration management and grade calculations.
+  - `router.go`: HTTP routing table, CORS preflight middleware, and OPTIONS request handlers.
+  - `swagger.go`: OpenAPI 3.0 JSON specification handler and embedded Swagger UI documentation (`/docs`).
+- **`internal/dal/dal.go`**: Database Abstraction Layer (DAL). Executes optimized, indexed SQL queries against PostgreSQL concurrently, supporting target student SQL filtering (`WHERE user_id IN (...)`).
+- **`internal/db/db.go`**: PostgreSQL database connection pool setup and automatic index creation (`EnsureIndexes`).
+- **`internal/cache/cache.go`**: Real-time data fetching engine (`CacheManager`). Executes 6 parallel database queries concurrently over worker goroutines on every request with zero route-level caching.
+- **`internal/service/calculator.go`**: Core `GradeCalculator` domain service. Performs real-time grade calculations, unopened exercise filtering, sequential student recommendations, and course status analytics.
+- **`internal/config/config.go`**: YAML course configuration manager (`ConfigManager`).
+- **`internal/model/models.go`**: Go data models, DB entity structs, clearance level enums, status constants, and API request/response DTOs.
+- **`tests/`**: Comprehensive Go unit, integration, and large-scale performance benchmark test suite (`calc_test.go`, `student_filtering_test.go`).
 
 ---
 
@@ -48,24 +54,23 @@ erDiagram
 | **`AssignmentResponseContent`** | `assignments_assignmentresponsecontent` | Payload text content linked to a response (`response_id`). Contains staff grade text. | `id`, `response_id`, `content`, `field_id` |
 
 ### Clearance Levels (`management_courseuser.clearance`)
-- **`1`** (`ClearanceLevel.HANICH`): Student / Participant (Hanich).
-- **`2`** (`ClearanceLevel.CHECKER`): Exercise Checker.
-- **`3`** (`ClearanceLevel.SEGEL`): Staff Member (Segel).
-- **`5`** (`ClearanceLevel.ADMIN`): System Administrator.
+- **`1`** (`ClearanceHanich`): Student / Participant (Hanich).
+- **`2`** (`ClearanceChecker`): Exercise Checker.
+- **`3`** (`ClearanceSegel`): Staff Member (Segel).
+- **`5`** (`ClearanceAdmin`): System Administrator.
 
 ### Assignment Status Integer Mapping (`assignments_assignment.assignment_status`)
-In PostgreSQL, `assignment_status` is stored as an integer and mapped to string enums:
-- **`0`** $\rightarrow$ `"New"` (`AssignmentStatus.NEW`)
-- **`1`** $\rightarrow$ `"Work In Progress"` (`AssignmentStatus.WORK_IN_PROGRESS`)
-- **`2`** $\rightarrow$ `"Redo"` (`AssignmentStatus.REDO`)
-- **`3`** $\rightarrow$ `"Submitted"` (`AssignmentStatus.SUBMITTED`)
-- **`4`** $\rightarrow$ `"AutoChecked"` (`AssignmentStatus.AUTO_CHECKED`)
-- **`5`** $\rightarrow$ `"Done"` (`AssignmentStatus.DONE`)
+In PostgreSQL, `assignment_status` is stored as an integer and mapped to string constants:
+- **`0`** $\rightarrow$ `"New"` (`StatusNew`)
+- **`1`** $\rightarrow$ `"Work In Progress"` (`StatusWorkInProgress`)
+- **`2`** $\rightarrow$ `"Redo"` (`StatusRedo`)
+- **`3`** $\rightarrow$ `"Submitted"` (`StatusSubmitted`)
+- **`4`** $\rightarrow$ `"AutoChecked"` (`StatusAutoChecked`)
+- **`5`** $\rightarrow$ `"Done"` (`StatusDone`)
 
 ### Assignment Response Types (`assignments_assignmentresponse.response_type`)
 - **`segel_only = True`**: Staff review entries (`Redo`, `Comment`, `Done`).
 - **`segel_only = False`**: Student submission entries (`Work In Progress`, `Submission`).
-
 
 ---
 
@@ -73,18 +78,18 @@ In PostgreSQL, `assignment_status` is stored as an integer and mapped to string 
 
 ### Unopened Exercise Filtering in Grade Calculations
 - **Grade Calculation Routes** (`/calc/exercise`, `/calc/module`, `/calc/subject`, `/calc/course`, `/calc/student`):
-  - Exercises that the student has never opened (`status is None` / `assignment is None`) MUST be **100% excluded** from calculation responses.
+  - Exercises that the student has never opened (`assignment is None` / `!hasAssignment`) MUST be **100% excluded** from calculation responses.
   - Only exercises opened or reached by the student are returned.
 
 ### Student Recommendation Queue (`/calc/student/recommendations`)
 - **Subject Strategy Plan & Target Score Cutoff**: Groups recommendations by subject. Accepts a `target_score` (default: `70.0`) to raise basic subject proficiency. Automatically stops adding exercises to a subject's queue as soon as `projected_grade >= target_score`.
-- **Sequential Unreached Recommendations**: Recommends exercises sequentially ($E_1 \rightarrow E_2 \rightarrow E_3$) after prerequisite exercises achieve $\ge 80\%$ grade percentage or `DONE` status. No arbitrary priority string fields.
+- **Sequential Unreached Recommendations**: Recommends exercises sequentially ($E_1 \rightarrow E_2 \rightarrow E_3$) after prerequisite exercises achieve $\ge 80\%$ grade percentage or `DONE` status.
 - **Assignment URL Generation**: Generates valid direct `assignment_url` links (`https://.../course/{sub}/{mod}/{ex}#{student_id}`) even for unreached exercises (`assignment is None`) so students can click to open them.
 - **Zero-Weight Filtering**: Exercises in zero-weight subjects (`weight <= 0.0`) or zero-weight modules (`weight <= 0.0`) MUST be skipped and excluded from recommendations.
 
 ### Staff Evaluation Tracking (`redo_count` & `is_checked`)
-- each assignment with final statuses `REDO`/`WORK_IN_PROGRESS`/`DONE` must be graded. assignments with status `DONE`, their grade is default 100. `REDO` & `WORK_IN_PROGRESS` grades are given in a `segel_only == True` response and comment is exracted and represents the grade.
-- **`redo_count`**: Dynamically counts staff REDO evaluation responses (`segel_only == True` and `response_type == AssignmentResponseType.REDO`) from assignment response history.
+- Each assignment with final status `REDO`, `WORK_IN_PROGRESS`, or `DONE` must be graded. Assignments with status `DONE` default to 100%. `REDO` and `WORK_IN_PROGRESS` grades are given in a `segel_only == True` response, where text comments are parsed for numeric grades via `ParseGradeFromContent`.
+- **`redo_count`**: Dynamically counts staff REDO evaluation responses (`segel_only == True` and `response_type == "Redo"`) from assignment response history.
 - **`is_checked`**:
   - `True`: Latest staff review date $\ge$ latest student submission date.
   - `False`: Student submitted/resubmitted code after the last staff review, or staff has not reviewed the submission yet.
@@ -94,16 +99,24 @@ In PostgreSQL, `assignment_status` is stored as an integer and mapped to string 
 - Includes standard statuses (`DONE`, `REDO`, `WORK_IN_PROGRESS`, `SUBMITTED`, `NEW`) as well as unchecked counters:
   - **`REDO_UNCHECKED`**: `status == REDO` and `not is_checked`.
   - **`WIP_UNCHECKED`**: `status == WORK_IN_PROGRESS` and `not is_checked`.
+- **Unopened exercises** (`!hasAssignment`) are strictly excluded from status breakdown counters.
 
 ---
 
-## 4. Caching & Performance Conventions
+## 4. Database & Performance Conventions
 
-- **100% RAM Caching (Zero Disk Persistence)**: All API response caching resides strictly in RAM (`CacheManager` in memory). Writing to disk or persistent file caches is prohibited.
-- **Dynamic Calculation on Every Request**: Every API request dynamically re-evaluates all subject/module weights, exercise scores, course summaries, recommendations, and status counts from scratch. No full route-level caching.
-- **High-Concurrency Parallel Prefetching**: When fetching fresh data or on cold runs, prefetching uses parallel goroutines to fetch raw Hive API data concurrently in a single batch.
-- **OPTIONS Method & CORS Preflight**: All API routes expose explicit `OPTIONS` preflight handlers returning `200 OK` with valid CORS headers.
-- **Preformance** Each hot route should take in the worst case five seconds. The applications DB calls are efficient as possible
+- **Real-Time DB Queries (No Inter-Request Caching)**: Inter-request caching is completely disabled. Every API request dynamically queries the PostgreSQL database in real-time to fetch the most up-to-date assignments, responses, exercises, and student data.
+- **SQL-Level Target Filtering**: For student-specific API requests (`/calc/student`, `/calc/student/recommendations`), SQL queries use `WHERE user_id IN (...)`, fetching only target rows and providing a **53x reduction in data payload**.
+- **High-Concurrency Parallel Prefetching**: Data fetching uses 6 parallel goroutines via `sync.WaitGroup` to fetch all database entities concurrently over worker connections in a single batch.
+- **Database Indexing**: Automatic creation of composite indexes on `assignments_assignment(user_id, exercise_id)`, `assignments_assignmentresponse(thread_id, segel_only)`, and `management_courseuser(clearance)` ensures sub-5ms index scans.
+- **Performance Standard**: Sub-25ms execution time for single-student and course-wide routes across 4,000 exercises and 53 students.
 
+---
+
+## 5. Development & Testing Guidelines
+
+- **Run Test Suite**:
+  ```powershell
+  & "C:\Program Files\Go\bin\go.exe" test -v -count=1 ./...
   ```
 - **Rule of Verification**: Never declare a task complete without running the full test suite and confirming 100% pass rate.

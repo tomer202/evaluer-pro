@@ -29,7 +29,7 @@ func NewConfigManager(dalInstance *dal.DAL) *ConfigManager {
 		dal:        dalInstance,
 	}
 	// Try loading initial config, otherwise generate default
-	if err := cm.Load(); err != nil {
+	if err := cm.Load(); err != nil && dalInstance != nil {
 		cm.GenerateAndSave(path)
 	}
 	return cm
@@ -45,6 +45,12 @@ func (cm *ConfigManager) GetActiveConfig() model.CourseConfig {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 	return cm.active
+}
+
+func (cm *ConfigManager) SetActiveConfig(cfg model.CourseConfig) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.active = cfg
 }
 
 func (cm *ConfigManager) Load() error {

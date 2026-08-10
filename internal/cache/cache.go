@@ -19,35 +19,49 @@ type CachedData struct {
 }
 
 type CacheManager struct {
-	mu        sync.RWMutex
-	dal       *dal.DAL
-	cache     *CachedData
-	ttl       time.Duration
-	isEnabled bool
+	mu           sync.RWMutex
+	dal          *dal.DAL
+	testOverride *CachedData
 }
 
 func NewCacheManager(dalInstance *dal.DAL) *CacheManager {
 	return &CacheManager{
-		dal:       dalInstance,
-		ttl:       24 * time.Hour,
-		isEnabled: true,
+		dal: dalInstance,
 	}
+}
+
+func (cm *CacheManager) SetCachedData(data *CachedData) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.testOverride = data
 }
 
 func (cm *CacheManager) GetOrFetchData(targetStudents []string) (*CachedData, error) {
 	cm.mu.RLock()
-	if cm.isEnabled && cm.cache != nil && time.Since(cm.cache.FetchedAt) < cm.ttl {
-		cached := cm.cache
+	if cm.testOverride != nil {
+		data := cm.testOverride
 		cm.mu.RUnlock()
-		return cached, nil
+		return data, nil
 	}
 	cm.mu.RUnlock()
 
-	// High concurrency parallel prefetching
+	// Always execute real-time DB queries on every request
 	return cm.Refresh(targetStudents)
 }
 
 func (cm *CacheManager) Refresh(targetStudents []string) (*CachedData, error) {
+	var targetUserIDs []int
+
+	if cm.dal != nil && len(targetStudents) > 0 {
+		stus, err := cm.dal.FetchStudents(targetStudents)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range stus {
+			targetUserIDs = append(targetUserIDs, s.ID)
+		}
+	}
+
 	var wg sync.WaitGroup
 	var subjects []model.SubjectEntity
 	var modules []model.ModuleEntity
@@ -62,32 +76,44 @@ func (cm *CacheManager) Refresh(targetStudents []string) (*CachedData, error) {
 
 	go func() {
 		defer wg.Done()
-		subjects, errSub = cm.dal.FetchSubjects()
+		if cm.dal != nil {
+			subjects, errSub = cm.dal.FetchSubjects()
+		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		modules, errMod = cm.dal.FetchModules()
+		if cm.dal != nil {
+			modules, errMod = cm.dal.FetchModules()
+		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		exercises, errExe = cm.dal.FetchExercises()
+		if cm.dal != nil {
+			exercises, errExe = cm.dal.FetchExercises()
+		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		students, errStu = cm.dal.FetchStudents(targetStudents)
+		if cm.dal != nil {
+			students, errStu = cm.dal.FetchStudents(nil)
+		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		assignments, errAss = cm.dal.FetchAssignments()
+		if cm.dal != nil {
+			assignments, errAss = cm.dal.FetchAssignments(targetUserIDs)
+		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		responses, errRes = cm.dal.FetchResponses()
+		if cm.dal != nil {
+			responses, errRes = cm.dal.FetchResponses(targetUserIDs)
+		}
 	}()
 
 	wg.Wait()
@@ -120,10 +146,6 @@ func (cm *CacheManager) Refresh(targetStudents []string) (*CachedData, error) {
 		Responses:   responses,
 		FetchedAt:   time.Now(),
 	}
-
-	cm.mu.Lock()
-	cm.cache = newData
-	cm.mu.Unlock()
 
 	return newData, nil
 }

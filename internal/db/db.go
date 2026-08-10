@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"evaluer/internal/dal"
+
 	_ "github.com/lib/pq"
 )
 
@@ -62,6 +64,7 @@ func InitDB() (*sql.DB, error) {
 		log.Printf("Warning: Database ping failed: %v", err)
 	} else {
 		log.Println("Database connection pool established successfully")
+		dal.EnsureIndexes(database)
 	}
 
 	DB = database

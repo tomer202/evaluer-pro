@@ -30,16 +30,7 @@ func main() {
 	configMgr := config.NewConfigManager(dalInst)
 	calcEngine := service.NewGradeCalculator(cacheMgr, configMgr)
 
-	// Pre-warm cache in memory
-	go func() {
-		log.Println("Pre-warming RAM cache in background...")
-		_, err := cacheMgr.Refresh(nil)
-		if err != nil {
-			log.Printf("RAM Cache pre-warm error: %v", err)
-		} else {
-			log.Println("RAM Cache pre-warm completed successfully!")
-		}
-	}()
+
 
 	router := api.SetupRouter(calcEngine, configMgr)
 
