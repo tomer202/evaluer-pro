@@ -1,0 +1,42 @@
+subjects:
+  Sukmi:
+    name: Sukmi
+    weight: 0.4
+    modules:
+      test:
+        name: test
+        weight: 0.5
+        exercises:
+          today:
+            name: today
+            score: 100
+          tomorrow:
+            name: tomorrow
+            score: 100
+      dreams:
+        name: dreams
+        weight: 0.5
+        exercises:
+          shichrur:
+            name: shichrur
+            score: 100
+          nownew:
+            name: nownew
+            score: 100
+          today:
+            name: today
+            score: 100
+          heyo:
+            name: heyo
+            score: 100
+  bro:
+    name: bro
+    weight: 0.6
+    modules:
+      111qqqq:
+        name: 111qqqq
+        weight: 1.0
+        exercises:
+          now:
+            name: now
+            score: 100

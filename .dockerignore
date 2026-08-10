@@ -1,0 +1,10 @@
+.git
+.gitignore
+.local
+*.exe
+*.log
+scratch/
+.agents/
+.vscode/
+README.md
+GEMINI.md
