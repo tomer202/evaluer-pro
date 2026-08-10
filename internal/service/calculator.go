@@ -23,7 +23,10 @@ func makeAssignmentKey(userID, exerciseID int) uint64 {
 	return (uint64(userID) << 32) | uint64(exerciseID)
 }
 
-var numberRegex = regexp.MustCompile(`\b([0-9]+(?:\.[0-9]+)?)\b`)
+var (
+	fractionRegex = regexp.MustCompile(`(?i)\b([0-9]+(?:\.[0-9]+)?)\s*(?:/|out of|מתוך)\s*([0-9]+(?:\.[0-9]+)?)\b`)
+	numberRegex   = regexp.MustCompile(`\b([0-9]+(?:\.[0-9]+)?)\b`)
+)
 
 type GradeCalculator struct {
 	cacheMgr  *cache.CacheManager
@@ -55,12 +58,28 @@ func ParseGradeFromContent(content string) float64 {
 	lines := strings.Split(content, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
+
+		// 1. Check for fraction patterns (e.g., "85/100", "85 out of 100", "85 מתוך 100")
+		if fracMatches := fractionRegex.FindAllStringSubmatch(line, -1); len(fracMatches) > 0 {
+			lastFrac := fracMatches[len(fracMatches)-1]
+			num, err1 := strconv.ParseFloat(lastFrac[1], 64)
+			den, err2 := strconv.ParseFloat(lastFrac[2], 64)
+			if err1 == nil && err2 == nil && den > 0 {
+				calcGrade := (num / den) * 100.0
+				if calcGrade >= 0 && calcGrade <= 100 {
+					return roundToTwoDecimals(calcGrade)
+				}
+			}
+		}
+
+		// 2. Check for single numbers (e.g., "Grade: 85")
 		matches := numberRegex.FindAllString(line, -1)
 		if len(matches) > 0 {
-			lastMatch := matches[len(matches)-1]
-			if val, err := strconv.ParseFloat(lastMatch, 64); err == nil {
-				if val >= 0 && val <= 100 {
-					return val
+			for mIdx := len(matches) - 1; mIdx >= 0; mIdx-- {
+				if val, err := strconv.ParseFloat(matches[mIdx], 64); err == nil {
+					if val >= 0 && val <= 100 {
+						return roundToTwoDecimals(val)
+					}
 				}
 			}
 		}
@@ -482,11 +501,13 @@ func (c *GradeCalculator) CalculateSubject(req model.SubjectCalcRequest) (*model
 						exCount++
 					}
 
-					mGrade := 100.0
+					if exCount == 0 {
+						continue
+					}
+
+					mGrade := 0.0
 					if totalMaxScore > 0 {
 						mGrade = roundToTwoDecimals((totalWeightedScore / totalMaxScore) * 100.0)
-					} else if exCount == 0 {
-						mGrade = 0.0
 					}
 
 					totalWeightedModuleGrade += mGrade * modWeight
@@ -600,22 +621,24 @@ func (c *GradeCalculator) CalculateCourse(req model.CourseCalcRequest) (*model.C
 							exCount++
 						}
 
-						mGrade := 100.0
+						if exCount == 0 {
+							continue
+						}
+
+						mGrade := 0.0
 						if totalMaxScore > 0 {
 							mGrade = roundToTwoDecimals((totalWeightedScore / totalMaxScore) * 100.0)
-						} else if exCount == 0 {
-							mGrade = 0.0
 						}
 
 						totalWeightedModuleGrade += mGrade * modWeight
 						totalModuleWeight += modWeight
 					}
 
-					sGrade := 0.0
-					if totalModuleWeight > 0 {
-						sGrade = roundToTwoDecimals(totalWeightedModuleGrade / totalModuleWeight)
+					if totalModuleWeight == 0 {
+						continue
 					}
 
+					sGrade := roundToTwoDecimals(totalWeightedModuleGrade / totalModuleWeight)
 					totalWeightedSubjectGrade += sGrade * subWeight
 					totalSubjectWeight += subWeight
 
@@ -736,11 +759,13 @@ func (c *GradeCalculator) CalculateStudent(req model.StudentDetailRequest) (*mod
 				})
 			}
 
-			modGrade := 100.0
+			if len(exGrades) == 0 {
+				continue
+			}
+
+			modGrade := 0.0
 			if totalExMaxScore > 0 {
 				modGrade = roundToTwoDecimals((totalWeightedExScore / totalExMaxScore) * 100.0)
-			} else if len(exGrades) == 0 {
-				modGrade = 0.0
 			}
 
 			totalWeightedModGrade += modGrade * modWeight
@@ -753,11 +778,11 @@ func (c *GradeCalculator) CalculateStudent(req model.StudentDetailRequest) (*mod
 			})
 		}
 
-		subjectGrade := 0.0
-		if totalModWeight > 0 {
-			subjectGrade = roundToTwoDecimals(totalWeightedModGrade / totalModWeight)
+		if totalModWeight == 0 {
+			continue
 		}
 
+		subjectGrade := roundToTwoDecimals(totalWeightedModGrade / totalModWeight)
 		totalWeightedSubGrade += subjectGrade * subWeight
 		totalSubWeight += subWeight
 
@@ -851,11 +876,13 @@ func (c *GradeCalculator) CalculateRecommendations(req model.StudentRecRequest) 
 				exCount++
 			}
 
-			mGrade := 100.0
+			if exCount == 0 {
+				continue
+			}
+
+			mGrade := 0.0
 			if totalMaxScore > 0 {
 				mGrade = roundToTwoDecimals((totalWeightedScore / totalMaxScore) * 100.0)
-			} else if exCount == 0 {
-				mGrade = 0.0
 			}
 
 			totalWeightedModuleGrade += mGrade * modWeight
