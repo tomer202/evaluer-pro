@@ -105,8 +105,8 @@ In PostgreSQL, `assignment_status` is stored as an integer and mapped to string 
 - Each assignment with final status `REDO`, `WORK_IN_PROGRESS`, or `DONE` must be graded. Assignments with status `DONE` default to 100%. `REDO` and `WORK_IN_PROGRESS` grades are given in a `segel_only == True` response, where text comments are parsed for numeric grades via `ParseGradeFromContent`.
 - **`redo_count`**: Dynamically counts staff REDO evaluation responses (`segel_only == True` and `response_type == "Redo"`) from assignment response history.
 - **`is_checked`**:
-  - `True`: Latest staff review date $\ge$ latest student submission date.
-  - `False`: Student submitted/resubmitted code after the last staff review, or staff has not reviewed the submission yet.
+  - `True`: Assignment status is `DONE` (`5`), assignment status is `NEW` (`0`), or latest staff review date $\ge$ latest student submission date.
+  - `False`: Student submitted/resubmitted code after the last staff review on an active submission (`REDO`, `WORK_IN_PROGRESS`, `SUBMITTED`), or staff has not reviewed the submission yet.
 
 ### Course Status Breakdown Route (`/calc/course/status`)
 - Reports summary counts across exercise, module, subject, and course levels.

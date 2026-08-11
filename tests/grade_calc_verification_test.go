@@ -235,3 +235,48 @@ func TestHealthCheckRoute(t *testing.T) {
 		t.Errorf("Unexpected body for /api-health: %s", body)
 	}
 }
+
+func TestDoneStatusIsCheckedAlwaysTrue(t *testing.T) {
+	cacheMgr := cache.NewCacheManager(nil)
+	configMgr := config.NewConfigManager(nil)
+
+	now := time.Now()
+	cacheMgr.SetCachedData(&cache.CachedData{
+		Subjects:  []model.SubjectEntity{{ID: 1, Name: "Math"}},
+		Modules:   []model.ModuleEntity{{ID: 1, Name: "Mod1", ParentSubjectID: 1}},
+		Exercises: []model.ExerciseEntity{{ID: 1, Name: "Ex1", ParentModuleID: 1}},
+		Students:  []model.UserEntity{{ID: 10, Username: "charlie", Clearance: 1}},
+		Assignments: []model.AssignmentEntity{
+			{ID: 100, UserID: 10, ExerciseID: 1, AssignmentStatus: model.AssignmentStatusDone, Date: now},
+		},
+		Responses: []model.ResponseEntity{
+			{ID: 1, ThreadID: 100, UserID: 10, Date: now.Add(1 * time.Hour), SegelOnly: false, ResponseType: "Submission", Content: ""},
+			{ID: 2, ThreadID: 100, UserID: 2, Date: now, SegelOnly: true, ResponseType: "Redo", Content: "100"},
+		},
+		FetchedAt: now,
+	})
+
+	calc := service.NewGradeCalculator(cacheMgr, configMgr)
+
+	resp, err := calc.CalculateExercise(model.ExerciseCalcRequest{
+		SubjectName:  "Math",
+		ModuleName:   "Mod1",
+		ExerciseName: "Ex1",
+		Students:     []string{"charlie"},
+	})
+	if err != nil {
+		t.Fatalf("CalculateExercise failed: %v", err)
+	}
+
+	if len(resp.Grades) != 1 {
+		t.Fatalf("Expected 1 grade result, got %d", len(resp.Grades))
+	}
+
+	g := resp.Grades[0]
+	if g.Status != model.StatusDone {
+		t.Errorf("Expected Status Done, got %s", g.Status)
+	}
+	if !g.IsChecked {
+		t.Errorf("Expected IsChecked to be TRUE for Done assignment status, got false!")
+	}
+}

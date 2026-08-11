@@ -249,17 +249,16 @@ func calculateAssignmentGradeInfo(
 		}
 	}
 
-	if hasSegelReview {
+	if assign.AssignmentStatus == model.AssignmentStatusDone {
+		isChecked = true
+	} else if hasSegelReview {
 		if latestStudentDate.IsZero() {
 			isChecked = true
 		} else {
 			isChecked = !latestStudentDate.After(latestSegelDate)
 		}
 	} else {
-		// If status is DONE or NEW, default is checked unless WIP/REDO/SUBMITTED unreviewed
-		if assign.AssignmentStatus == model.AssignmentStatusDone {
-			isChecked = true
-		} else if assign.AssignmentStatus == model.AssignmentStatusNew {
+		if assign.AssignmentStatus == model.AssignmentStatusNew {
 			isChecked = true
 		} else {
 			isChecked = false

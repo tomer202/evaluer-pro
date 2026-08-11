@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -44,7 +45,12 @@ func (h *APIHandler) HealthCheck(c *gin.Context) {
 // Config Handlers
 
 func (h *APIHandler) GetConfig(c *gin.Context) {
-	c.JSON(http.StatusOK, h.configMgr.GetActiveConfig())
+	jsonBytes, err := h.configMgr.GetActiveConfigRawJSON()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", jsonBytes)
 }
 
 func (h *APIHandler) GenerateConfig(c *gin.Context) {
@@ -52,33 +58,35 @@ func (h *APIHandler) GenerateConfig(c *gin.Context) {
 	pathQuery := c.Query("path")
 
 	if saveQuery == "true" {
-		cfg, err := h.configMgr.GenerateAndSave(pathQuery)
+		jsonBytes, err := h.configMgr.GenerateAndSaveRaw(pathQuery)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		var cfgObj interface{}
+		_ = json.Unmarshal(jsonBytes, &cfgObj)
 		c.JSON(http.StatusOK, gin.H{
 			"message":     "Config successfully generated and saved to disk",
 			"config_path": h.configMgr.GetConfigPath(),
-			"config":      cfg,
+			"config":      cfgObj,
 		})
 	} else {
-		cfg, err := h.configMgr.GenerateSkeleton()
+		jsonBytes, err := h.configMgr.GenerateSkeletonRawJSON()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, cfg)
+		c.Data(http.StatusOK, "application/json; charset=utf-8", jsonBytes)
 	}
 }
 
 func (h *APIHandler) PreviewConfig(c *gin.Context) {
-	cfg, err := h.configMgr.GenerateSkeleton()
+	jsonBytes, err := h.configMgr.GenerateSkeletonRawJSON()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, cfg)
+	c.Data(http.StatusOK, "application/json; charset=utf-8", jsonBytes)
 }
 
 func (h *APIHandler) PutConfig(c *gin.Context) {
@@ -94,18 +102,28 @@ func (h *APIHandler) PutConfig(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, h.configMgr.GetActiveConfig())
+	jsonBytes, err := h.configMgr.GetActiveConfigRawJSON()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", jsonBytes)
 }
 
 func (h *APIHandler) PatchConfig(c *gin.Context) {
-	var patchData map[string]interface{}
-	if err := c.ShouldBindJSON(&patchData); err != nil {
+	bodyBytes, err := c.GetRawData()
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	updated, _ := h.configMgr.Patch(patchData)
-	c.JSON(http.StatusOK, updated)
+	jsonBytes, err := h.configMgr.PatchRawJSON(bodyBytes)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Data(http.StatusOK, "application/json; charset=utf-8", jsonBytes)
 }
 
 // Calc Handlers

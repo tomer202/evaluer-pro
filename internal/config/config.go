@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ type ConfigManager struct {
 	mu         sync.RWMutex
 	configPath string
 	active     model.CourseConfig
+	rawYAML    []byte
 	dal        *dal.DAL
 }
 
@@ -31,7 +33,7 @@ func NewConfigManager(dalInstance *dal.DAL) *ConfigManager {
 	}
 	// Try loading initial config, otherwise generate default
 	if err := cm.Load(); err != nil && dalInstance != nil {
-		cm.GenerateAndSave(path)
+		_, _ = cm.GenerateAndSaveRaw(path)
 	}
 	return cm
 }
@@ -52,6 +54,24 @@ func (cm *ConfigManager) SetActiveConfig(cfg model.CourseConfig) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	cm.active = cfg
+	data, err := yaml.Marshal(cfg)
+	if err == nil {
+		cm.rawYAML = data
+	}
+}
+
+func (cm *ConfigManager) GetActiveConfigRawJSON() ([]byte, error) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	if len(cm.rawYAML) > 0 {
+		return ConvertYAMLToJSON(cm.rawYAML)
+	}
+	data, err := yaml.Marshal(cm.active)
+	if err != nil {
+		return nil, err
+	}
+	return ConvertYAMLToJSON(data)
 }
 
 func (cm *ConfigManager) Load() error {
@@ -71,6 +91,7 @@ func (cm *ConfigManager) Load() error {
 		cfg.Subjects = make(map[string]model.SubjectConfig)
 	}
 	cm.active = cfg
+	cm.rawYAML = data
 	return nil
 }
 
@@ -84,6 +105,93 @@ func stripFlowStyle(n *yaml.Node) {
 	for _, child := range n.Content {
 		stripFlowStyle(child)
 	}
+}
+
+func encodeNodeToJSON(n *yaml.Node) ([]byte, error) {
+	if n == nil {
+		return []byte("null"), nil
+	}
+	switch n.Kind {
+	case yaml.DocumentNode:
+		if len(n.Content) > 0 {
+			return encodeNodeToJSON(n.Content[0])
+		}
+		return []byte("null"), nil
+
+	case yaml.MappingNode:
+		var buf bytes.Buffer
+		buf.WriteString("{")
+		for i := 0; i < len(n.Content); i += 2 {
+			if i > 0 {
+				buf.WriteString(",")
+			}
+			keyBytes, err := json.Marshal(n.Content[i].Value)
+			if err != nil {
+				return nil, err
+			}
+			valBytes, err := encodeNodeToJSON(n.Content[i+1])
+			if err != nil {
+				return nil, err
+			}
+			buf.Write(keyBytes)
+			buf.WriteString(":")
+			buf.Write(valBytes)
+		}
+		buf.WriteString("}")
+		return buf.Bytes(), nil
+
+	case yaml.SequenceNode:
+		var buf bytes.Buffer
+		buf.WriteString("[")
+		for i, item := range n.Content {
+			if i > 0 {
+				buf.WriteString(",")
+			}
+			itemBytes, err := encodeNodeToJSON(item)
+			if err != nil {
+				return nil, err
+			}
+			buf.Write(itemBytes)
+		}
+		buf.WriteString("]")
+		return buf.Bytes(), nil
+
+	case yaml.ScalarNode:
+		if n.Tag == "!!null" || n.Value == "null" || (n.Value == "" && n.Style == 0) {
+			if n.Tag == "!!str" {
+				return json.Marshal("")
+			}
+			return []byte("null"), nil
+		}
+		if n.Tag == "!!bool" {
+			if n.Value == "true" || n.Value == "false" {
+				return []byte(n.Value), nil
+			}
+		}
+		if n.Tag == "!!int" || n.Tag == "!!float" {
+			return []byte(n.Value), nil
+		}
+		var rawVal interface{}
+		if err := n.Decode(&rawVal); err == nil {
+			return json.Marshal(rawVal)
+		}
+		return json.Marshal(n.Value)
+
+	case yaml.AliasNode:
+		return encodeNodeToJSON(n.Alias)
+
+	default:
+		return json.Marshal(n.Value)
+	}
+}
+
+// ConvertYAMLToJSON converts raw YAML bytes to JSON bytes while preserving exact key & value sequence.
+func ConvertYAMLToJSON(yamlBytes []byte) ([]byte, error) {
+	var node yaml.Node
+	if err := yaml.Unmarshal(yamlBytes, &node); err != nil {
+		return nil, err
+	}
+	return encodeNodeToJSON(&node)
 }
 
 // ConvertJSONToYAML converts raw JSON bytes to YAML bytes while preserving exact key & value sequence.
@@ -160,21 +268,25 @@ func (cm *ConfigManager) SaveRawJSON(path string, jsonBytes []byte) error {
 	}
 
 	cm.configPath = path
+	cm.rawYAML = yamlBytes
 	return nil
 }
 
-func (cm *ConfigManager) GenerateSkeleton() (model.CourseConfig, error) {
+func (cm *ConfigManager) GenerateSkeletonYAML() ([]byte, error) {
+	if cm.dal == nil {
+		return nil, fmt.Errorf("DAL instance is nil")
+	}
 	subjects, err := cm.dal.FetchSubjects()
 	if err != nil {
-		return model.CourseConfig{}, err
+		return nil, err
 	}
 	modules, err := cm.dal.FetchModules()
 	if err != nil {
-		return model.CourseConfig{}, err
+		return nil, err
 	}
 	exercises, err := cm.dal.FetchExercises()
 	if err != nil {
-		return model.CourseConfig{}, err
+		return nil, err
 	}
 
 	modMap := make(map[int][]model.ExerciseEntity)
@@ -187,48 +299,142 @@ func (cm *ConfigManager) GenerateSkeleton() (model.CourseConfig, error) {
 		subMap[m.ParentSubjectID] = append(subMap[m.ParentSubjectID], m)
 	}
 
-	cfg := model.CourseConfig{
-		Subjects: make(map[string]model.SubjectConfig),
-	}
+	var subjectsContent []*yaml.Node
 
 	for _, s := range subjects {
-		sc := model.SubjectConfig{
-			Name:    s.Name,
-			Weight:  1.0,
-			Modules: make(map[string]model.ModuleConfig),
-		}
+		var modulesContent []*yaml.Node
 		for _, m := range subMap[s.ID] {
-			mc := model.ModuleConfig{
-				Name:      m.Name,
-				Weight:    1.0,
-				Exercises: make(map[string]model.ExerciseConfig),
-			}
+			var exercisesContent []*yaml.Node
 			for _, e := range modMap[m.ID] {
-				mc.Exercises[e.Name] = model.ExerciseConfig{
-					Name:  e.Name,
-					Score: 100.0,
-				}
+				exercisesContent = append(exercisesContent,
+					&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: e.Name},
+					&yaml.Node{
+						Kind: yaml.MappingNode,
+						Tag:  "!!map",
+						Content: []*yaml.Node{
+							{Kind: yaml.ScalarNode, Tag: "!!str", Value: "name"},
+							{Kind: yaml.ScalarNode, Tag: "!!str", Value: e.Name},
+							{Kind: yaml.ScalarNode, Tag: "!!str", Value: "score"},
+							{Kind: yaml.ScalarNode, Tag: "!!float", Value: "100.0"},
+						},
+					},
+				)
 			}
-			sc.Modules[m.Name] = mc
+
+			modulesContent = append(modulesContent,
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: m.Name},
+				&yaml.Node{
+					Kind: yaml.MappingNode,
+					Tag:  "!!map",
+					Content: []*yaml.Node{
+						{Kind: yaml.ScalarNode, Tag: "!!str", Value: "name"},
+						{Kind: yaml.ScalarNode, Tag: "!!str", Value: m.Name},
+						{Kind: yaml.ScalarNode, Tag: "!!str", Value: "weight"},
+						{Kind: yaml.ScalarNode, Tag: "!!float", Value: "1.0"},
+						{Kind: yaml.ScalarNode, Tag: "!!str", Value: "exercises"},
+						{Kind: yaml.MappingNode, Tag: "!!map", Content: exercisesContent},
+					},
+				},
+			)
 		}
-		cfg.Subjects[s.Name] = sc
+
+		subjectsContent = append(subjectsContent,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s.Name},
+			&yaml.Node{
+				Kind: yaml.MappingNode,
+				Tag:  "!!map",
+				Content: []*yaml.Node{
+					{Kind: yaml.ScalarNode, Tag: "!!str", Value: "name"},
+					{Kind: yaml.ScalarNode, Tag: "!!str", Value: s.Name},
+					{Kind: yaml.ScalarNode, Tag: "!!str", Value: "weight"},
+					{Kind: yaml.ScalarNode, Tag: "!!float", Value: "1.0"},
+					{Kind: yaml.ScalarNode, Tag: "!!str", Value: "modules"},
+					{Kind: yaml.MappingNode, Tag: "!!map", Content: modulesContent},
+				},
+			},
+		)
 	}
 
-	return cfg, nil
+	docNode := &yaml.Node{
+		Kind: yaml.DocumentNode,
+		Content: []*yaml.Node{
+			{
+				Kind: yaml.MappingNode,
+				Tag:  "!!map",
+				Content: []*yaml.Node{
+					{Kind: yaml.ScalarNode, Tag: "!!str", Value: "subjects"},
+					{Kind: yaml.MappingNode, Tag: "!!map", Content: subjectsContent},
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	encoder := yaml.NewEncoder(&buf)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(docNode); err != nil {
+		return nil, err
+	}
+	_ = encoder.Close()
+	return buf.Bytes(), nil
 }
 
-func (cm *ConfigManager) GenerateAndSave(path string) (model.CourseConfig, error) {
-	cfg, err := cm.GenerateSkeleton()
+func (cm *ConfigManager) GenerateSkeleton() (model.CourseConfig, error) {
+	yamlBytes, err := cm.GenerateSkeletonYAML()
 	if err != nil {
 		return model.CourseConfig{}, err
 	}
+
+	var cfg model.CourseConfig
+	if err := yaml.Unmarshal(yamlBytes, &cfg); err != nil {
+		return model.CourseConfig{}, err
+	}
+	return cfg, nil
+}
+
+func (cm *ConfigManager) GenerateSkeletonRawJSON() ([]byte, error) {
+	yamlBytes, err := cm.GenerateSkeletonYAML()
+	if err != nil {
+		return nil, err
+	}
+	return ConvertYAMLToJSON(yamlBytes)
+}
+
+func (cm *ConfigManager) GenerateAndSaveRaw(path string) ([]byte, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	yamlBytes, err := cm.GenerateSkeletonYAML()
+	if err != nil {
+		return nil, err
+	}
+
 	if path == "" {
 		path = cm.configPath
 	}
-	if err := cm.Save(path, cfg); err != nil {
-		return cfg, err
+
+	dir := filepath.Dir(path)
+	if dir != "" && dir != "." {
+		_ = os.MkdirAll(dir, 0755)
 	}
-	return cfg, nil
+
+	if err := os.WriteFile(path, yamlBytes, 0644); err != nil {
+		return nil, err
+	}
+
+	var cfg model.CourseConfig
+	if err := yaml.Unmarshal(yamlBytes, &cfg); err == nil {
+		cm.active = cfg
+	}
+
+	cm.configPath = path
+	cm.rawYAML = yamlBytes
+	return ConvertYAMLToJSON(yamlBytes)
+}
+
+func (cm *ConfigManager) GenerateAndSave(path string) (model.CourseConfig, error) {
+	_, err := cm.GenerateAndSaveRaw(path)
+	return cm.GetActiveConfig(), err
 }
 
 func (cm *ConfigManager) Patch(patchData map[string]interface{}) (model.CourseConfig, error) {
@@ -293,6 +499,22 @@ func (cm *ConfigManager) Patch(patchData map[string]interface{}) (model.CourseCo
 	}
 
 	cm.active = active
-	_ = cm.Save(cm.configPath, cm.active)
-	return cm.active, fmt.Errorf("") // nil error
+	data, err := yaml.Marshal(cm.active)
+	if err == nil {
+		cm.rawYAML = data
+		_ = os.WriteFile(cm.configPath, cm.rawYAML, 0644)
+	}
+	return cm.active, nil
+}
+
+func (cm *ConfigManager) PatchRawJSON(bodyBytes []byte) ([]byte, error) {
+	var patchData map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &patchData); err != nil {
+		return nil, err
+	}
+	_, err := cm.Patch(patchData)
+	if err != nil {
+		return nil, err
+	}
+	return cm.GetActiveConfigRawJSON()
 }

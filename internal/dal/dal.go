@@ -70,7 +70,7 @@ func (d *DAL) FetchSubjects() ([]model.SubjectEntity, error) {
 	if d == nil || d.db == nil {
 		return nil, nil
 	}
-	rows, err := d.db.Query("SELECT id, name, parent_program_id FROM course_subject ORDER BY id")
+	rows, err := d.db.Query("SELECT id, name, parent_program_id FROM course_subject ORDER BY id ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (d *DAL) FetchModules() ([]model.ModuleEntity, error) {
 	if d == nil || d.db == nil {
 		return nil, nil
 	}
-	rows, err := d.db.Query(`SELECT id, name, COALESCE("order", ''), parent_subject_id FROM course_module ORDER BY id`)
+	rows, err := d.db.Query(`SELECT id, name, COALESCE("order", ''), parent_subject_id FROM course_module ORDER BY "order" ASC, id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (d *DAL) FetchExercises() ([]model.ExerciseEntity, error) {
 	if d == nil || d.db == nil {
 		return nil, nil
 	}
-	rows, err := d.db.Query(`SELECT id, name, COALESCE("order", ''), parent_module_id FROM course_exercise ORDER BY id`)
+	rows, err := d.db.Query(`SELECT id, name, COALESCE("order", ''), parent_module_id FROM course_exercise ORDER BY "order" ASC, id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func (d *DAL) FetchStudents(targetUsernames []string) ([]model.UserEntity, error
 		return nil, nil
 	}
 	ignoredMap := d.GetIgnoredUsernames()
-	query := `SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), clearance FROM management_courseuser WHERE clearance = 1`
+	query := `SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), clearance FROM management_courseuser WHERE clearance = 1 ORDER BY id ASC`
 
 	rows, err := d.db.Query(query)
 	if err != nil {
@@ -187,6 +187,7 @@ func (d *DAL) FetchAssignments(targetUserIDs []int) ([]model.AssignmentEntity, e
 		}
 		query += " WHERE user_id IN (" + strings.Join(placeholders, ",") + ")"
 	}
+	query += " ORDER BY id ASC"
 
 	rows, err := d.db.Query(query, args...)
 	if err != nil {
@@ -224,7 +225,7 @@ func (d *DAL) FetchResponses(targetUserIDs []int) ([]model.ResponseEntity, error
 		}
 		query += " WHERE a.user_id IN (" + strings.Join(placeholders, ",") + ")"
 	}
-	query += " ORDER BY r.date ASC"
+	query += " ORDER BY r.date ASC, r.id ASC"
 
 	rows, err := d.db.Query(query, args...)
 	if err != nil {
