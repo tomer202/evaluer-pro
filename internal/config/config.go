@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,6 +74,37 @@ func (cm *ConfigManager) Load() error {
 	return nil
 }
 
+func stripFlowStyle(n *yaml.Node) {
+	if n == nil {
+		return
+	}
+	if n.Style == yaml.FlowStyle {
+		n.Style = 0
+	}
+	for _, child := range n.Content {
+		stripFlowStyle(child)
+	}
+}
+
+// ConvertJSONToYAML converts raw JSON bytes to YAML bytes while preserving exact key & value sequence.
+func ConvertJSONToYAML(jsonBytes []byte) ([]byte, error) {
+	var node yaml.Node
+	decoder := yaml.NewDecoder(bytes.NewReader(jsonBytes))
+	if err := decoder.Decode(&node); err != nil {
+		return nil, err
+	}
+	stripFlowStyle(&node)
+
+	var buf bytes.Buffer
+	encoder := yaml.NewEncoder(&buf)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(&node); err != nil {
+		return nil, err
+	}
+	_ = encoder.Close()
+	return buf.Bytes(), nil
+}
+
 func (cm *ConfigManager) Save(path string, cfg model.CourseConfig) error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -97,6 +129,37 @@ func (cm *ConfigManager) Save(path string, cfg model.CourseConfig) error {
 
 	cm.configPath = path
 	cm.active = cfg
+	return nil
+}
+
+func (cm *ConfigManager) SaveRawJSON(path string, jsonBytes []byte) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	if path == "" {
+		path = cm.configPath
+	}
+
+	yamlBytes, err := ConvertJSONToYAML(jsonBytes)
+	if err != nil {
+		return err
+	}
+
+	dir := filepath.Dir(path)
+	if dir != "" && dir != "." {
+		_ = os.MkdirAll(dir, 0755)
+	}
+
+	if err := os.WriteFile(path, yamlBytes, 0644); err != nil {
+		return err
+	}
+
+	var cfg model.CourseConfig
+	if err := yaml.Unmarshal(yamlBytes, &cfg); err == nil {
+		cm.active = cfg
+	}
+
+	cm.configPath = path
 	return nil
 }
 

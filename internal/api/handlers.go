@@ -63,19 +63,19 @@ func (h *APIHandler) PreviewConfig(c *gin.Context) {
 }
 
 func (h *APIHandler) PutConfig(c *gin.Context) {
-	var newCfg model.CourseConfig
-	if err := c.ShouldBindJSON(&newCfg); err != nil {
+	bodyBytes, err := c.GetRawData()
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	pathQuery := c.Query("path")
-	if err := h.configMgr.Save(pathQuery, newCfg); err != nil {
+	if err := h.configMgr.SaveRawJSON(pathQuery, bodyBytes); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, newCfg)
+	c.JSON(http.StatusOK, h.configMgr.GetActiveConfig())
 }
 
 func (h *APIHandler) PatchConfig(c *gin.Context) {

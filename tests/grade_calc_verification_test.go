@@ -2,6 +2,7 @@ package tests
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -174,5 +175,38 @@ func TestScoreCalculation_UserFormula(t *testing.T) {
 				t.Errorf("Expected Mod2 grade 100.0, got %f", m.ModuleGrade)
 			}
 		}
+	}
+}
+
+func TestJSONToYAML_SequencePreservation(t *testing.T) {
+	jsonInput := []byte(`{
+  "weight": 1.0,
+  "name": "Math",
+  "modules": {
+    "Algebra": {
+      "weight": 0.5,
+      "name": "Algebra"
+    }
+  }
+}`)
+
+	yamlOutput, err := config.ConvertJSONToYAML(jsonInput)
+	if err != nil {
+		t.Fatalf("ConvertJSONToYAML failed: %v", err)
+	}
+
+	yamlStr := string(yamlOutput)
+	t.Logf("Converted YAML:\n%s", yamlStr)
+
+	// Check that "weight" appears before "name" in the YAML string
+	weightIdx := strings.Index(yamlStr, "weight")
+	nameIdx := strings.Index(yamlStr, "name")
+
+	if weightIdx == -1 || nameIdx == -1 {
+		t.Fatalf("Missing weight or name in YAML output: %s", yamlStr)
+	}
+
+	if weightIdx > nameIdx {
+		t.Errorf("Expected key 'weight' before 'name', but 'name' appeared first! Output:\n%s", yamlStr)
 	}
 }

@@ -115,6 +115,10 @@ In PostgreSQL, `assignment_status` is stored as an integer and mapped to string 
   - **`WIP_UNCHECKED`**: `status == WORK_IN_PROGRESS` and `not is_checked`.
 - **Unopened exercises** (`!hasAssignment`) are strictly excluded from status breakdown counters.
 
+### JSON to YAML Key & Value Sequence Preservation
+- When converting JSON payloads to YAML configurations (`config.ConvertJSONToYAML`), the exact sequence of keys and values MUST be preserved.
+- Map keys and nested objects are decoded into AST nodes (`yaml.Node`) to retain original insertion order without alphabetical re-sorting.
+
 ---
 
 ## 4. Database & Performance Conventions
