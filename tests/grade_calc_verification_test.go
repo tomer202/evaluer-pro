@@ -280,3 +280,91 @@ func TestDoneStatusIsCheckedAlwaysTrue(t *testing.T) {
 		t.Errorf("Expected IsChecked to be TRUE for Done assignment status, got false!")
 	}
 }
+
+func TestCalcResponse_ConfigSequenceOrdering(t *testing.T) {
+	cacheMgr := cache.NewCacheManager(nil)
+	configMgr := config.NewConfigManager(nil)
+
+	// Set config raw YAML with custom order: Physics before Math, Thermodynamics before Mechanics, ExB before ExA
+	yamlContent := `subjects:
+  Physics:
+    weight: 1.0
+    modules:
+      Thermodynamics:
+        weight: 1.0
+        exercises:
+          ExB:
+            name: "ExB"
+            score: 100
+          ExA:
+            name: "ExA"
+            score: 100
+  Math:
+    weight: 1.0
+    modules:
+      Algebra:
+        weight: 1.0
+        exercises:
+          Ex1:
+            name: "Ex1"
+            score: 100
+`
+	if err := configMgr.SaveRawJSON("", []byte(yamlContent)); err != nil {
+		// Save directly to active config rawYAML
+		configMgr.SetActiveConfig(model.CourseConfig{})
+	}
+
+	now := time.Now()
+	cacheMgr.SetCachedData(&cache.CachedData{
+		Subjects: []model.SubjectEntity{
+			{ID: 1, Name: "Math"},
+			{ID: 2, Name: "Physics"},
+		},
+		Modules: []model.ModuleEntity{
+			{ID: 10, Name: "Algebra", ParentSubjectID: 1},
+			{ID: 20, Name: "Thermodynamics", ParentSubjectID: 2},
+		},
+		Exercises: []model.ExerciseEntity{
+			{ID: 100, Name: "Ex1", ParentModuleID: 10},
+			{ID: 200, Name: "ExA", ParentModuleID: 20},
+			{ID: 201, Name: "ExB", ParentModuleID: 20},
+		},
+		Students: []model.UserEntity{
+			{ID: 5, Username: "dave", Clearance: 1},
+		},
+		Assignments: []model.AssignmentEntity{
+			{ID: 1000, UserID: 5, ExerciseID: 100, AssignmentStatus: model.AssignmentStatusDone, Date: now},
+			{ID: 2000, UserID: 5, ExerciseID: 200, AssignmentStatus: model.AssignmentStatusDone, Date: now},
+			{ID: 2001, UserID: 5, ExerciseID: 201, AssignmentStatus: model.AssignmentStatusDone, Date: now},
+		},
+		Responses: []model.ResponseEntity{},
+		FetchedAt: now,
+	})
+
+	calc := service.NewGradeCalculator(cacheMgr, configMgr)
+
+	studentResp, err := calc.CalculateStudent(model.StudentDetailRequest{Username: "dave"})
+	if err != nil {
+		t.Fatalf("CalculateStudent failed: %v", err)
+	}
+
+	if len(studentResp.Subjects) != 2 {
+		t.Fatalf("Expected 2 subjects, got %d", len(studentResp.Subjects))
+	}
+
+	// Verify Physics is returned BEFORE Math matching config.yaml sequence!
+	if studentResp.Subjects[0].SubjectName != "Physics" || studentResp.Subjects[1].SubjectName != "Math" {
+		t.Errorf("Expected Physics before Math in CalculateStudent response! Got: %s, %s",
+			studentResp.Subjects[0].SubjectName, studentResp.Subjects[1].SubjectName)
+	}
+
+	// Verify ExB is returned BEFORE ExA under Thermodynamics matching config.yaml sequence!
+	physModules := studentResp.Subjects[0].Modules
+	if len(physModules) > 0 && len(physModules[0].Exercises) == 2 {
+		exes := physModules[0].Exercises
+		if exes[0].ExerciseName != "ExB" || exes[1].ExerciseName != "ExA" {
+			t.Errorf("Expected ExB before ExA under Thermodynamics! Got: %s, %s",
+				exes[0].ExerciseName, exes[1].ExerciseName)
+		}
+	}
+}

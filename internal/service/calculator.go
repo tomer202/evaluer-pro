@@ -103,6 +103,7 @@ type PreparedData struct {
 	Config          model.CourseConfig
 	Students        []model.UserEntity
 	Subjects        map[int]model.SubjectEntity
+	OrderedSubjects []model.SubjectEntity
 	Modules         map[int]model.ModuleEntity
 	Exercises       map[int]model.ExerciseEntity
 	SubjectByName   map[string]model.SubjectEntity
@@ -155,6 +156,7 @@ func (c *GradeCalculator) prepareData(targetStudents []string) (*PreparedData, e
 		Config:          cfg,
 		Students:        filteredStudents,
 		Subjects:        make(map[int]model.SubjectEntity, len(cd.Subjects)),
+		OrderedSubjects: make([]model.SubjectEntity, 0, len(cd.Subjects)),
 		Modules:         make(map[int]model.ModuleEntity, len(cd.Modules)),
 		Exercises:       make(map[int]model.ExerciseEntity, len(cd.Exercises)),
 		SubjectByName:   make(map[string]model.SubjectEntity, len(cd.Subjects)),
@@ -181,6 +183,100 @@ func (c *GradeCalculator) prepareData(targetStudents []string) (*PreparedData, e
 		prep.Exercises[e.ID] = e
 		prep.ExerciseByName[e.Name] = e
 		prep.ModuleExercises[e.ParentModuleID] = append(prep.ModuleExercises[e.ParentModuleID], e)
+	}
+
+	// Align Subjects, Modules, and Exercises according to config.yaml sequence
+	seq := c.configMgr.GetConfigSequence()
+
+	// 1. Order Subjects matching config.yaml sequence
+	seenSubjects := make(map[int]bool)
+	if len(seq.Subjects) > 0 {
+		for _, sName := range seq.Subjects {
+			if s, ok := prep.SubjectByName[sName]; ok {
+				if !seenSubjects[s.ID] {
+					prep.OrderedSubjects = append(prep.OrderedSubjects, s)
+					seenSubjects[s.ID] = true
+				}
+			}
+		}
+	}
+	for _, s := range cd.Subjects {
+		if !seenSubjects[s.ID] {
+			prep.OrderedSubjects = append(prep.OrderedSubjects, s)
+			seenSubjects[s.ID] = true
+		}
+	}
+
+	// 2. Order Modules for each Subject matching config.yaml sequence
+	for _, s := range cd.Subjects {
+		mods := prep.SubjectModules[s.ID]
+		if len(mods) <= 1 {
+			continue
+		}
+		modListInConfig := seq.Modules[s.Name]
+		if len(modListInConfig) == 0 {
+			continue
+		}
+
+		modByName := make(map[string]model.ModuleEntity, len(mods))
+		for _, m := range mods {
+			modByName[m.Name] = m
+		}
+
+		orderedMods := make([]model.ModuleEntity, 0, len(mods))
+		seenMods := make(map[int]bool)
+
+		for _, mName := range modListInConfig {
+			if m, ok := modByName[mName]; ok {
+				if !seenMods[m.ID] {
+					orderedMods = append(orderedMods, m)
+					seenMods[m.ID] = true
+				}
+			}
+		}
+		for _, m := range mods {
+			if !seenMods[m.ID] {
+				orderedMods = append(orderedMods, m)
+				seenMods[m.ID] = true
+			}
+		}
+		prep.SubjectModules[s.ID] = orderedMods
+	}
+
+	// 3. Order Exercises for each Module matching config.yaml sequence
+	for _, m := range cd.Modules {
+		exes := prep.ModuleExercises[m.ID]
+		if len(exes) <= 1 {
+			continue
+		}
+		exListInConfig := seq.Exercises[m.Name]
+		if len(exListInConfig) == 0 {
+			continue
+		}
+
+		exByName := make(map[string]model.ExerciseEntity, len(exes))
+		for _, e := range exes {
+			exByName[e.Name] = e
+		}
+
+		orderedExes := make([]model.ExerciseEntity, 0, len(exes))
+		seenExes := make(map[int]bool)
+
+		for _, eName := range exListInConfig {
+			if e, ok := exByName[eName]; ok {
+				if !seenExes[e.ID] {
+					orderedExes = append(orderedExes, e)
+					seenExes[e.ID] = true
+				}
+			}
+		}
+		for _, e := range exes {
+			if !seenExes[e.ID] {
+				orderedExes = append(orderedExes, e)
+				seenExes[e.ID] = true
+			}
+		}
+		prep.ModuleExercises[m.ID] = orderedExes
 	}
 
 	// Map responses by ThreadID
@@ -552,11 +648,11 @@ func (c *GradeCalculator) CalculateCourse(req model.CourseCalcRequest) (*model.C
 			go func(idx int, s model.UserEntity) {
 				defer wg.Done()
 
-				subGrades := make([]model.SubjectGradeInCourse, 0, len(prep.Subjects))
+				subGrades := make([]model.SubjectGradeInCourse, 0, len(prep.OrderedSubjects))
 				var totalWeightedSubjectGrade float64
 				var totalSubjectWeight float64
 
-				for _, sub := range prep.Subjects {
+				for _, sub := range prep.OrderedSubjects {
 					subWeight := 1.0
 					sc, hasSubConfig := prep.Config.Subjects[sub.Name]
 					if hasSubConfig {
@@ -672,13 +768,13 @@ func (c *GradeCalculator) CalculateStudent(req model.StudentDetailRequest) (*mod
 		Username:  stu.Username,
 		FirstName: stu.FirstName,
 		LastName:  stu.LastName,
-		Subjects:  make([]model.StudentDetailSubjectGrade, 0, len(prep.Subjects)),
+		Subjects:  make([]model.StudentDetailSubjectGrade, 0, len(prep.OrderedSubjects)),
 	}
 
 	var totalWeightedSubGrade float64
 	var totalSubWeight float64
 
-	for _, sub := range prep.Subjects {
+	for _, sub := range prep.OrderedSubjects {
 		subWeight := 1.0
 		if sc, ok := prep.Config.Subjects[sub.Name]; ok {
 			subWeight = sc.Weight
@@ -796,10 +892,10 @@ func (c *GradeCalculator) CalculateRecommendations(req model.StudentRecRequest) 
 	resp := &model.StudentRecResponse{
 		Username:    stu.Username,
 		TargetScore: req.TargetScore,
-		Subjects:    make([]model.SubjectRec, 0, len(prep.Subjects)),
+		Subjects:    make([]model.SubjectRec, 0, len(prep.OrderedSubjects)),
 	}
 
-	for _, sub := range prep.Subjects {
+	for _, sub := range prep.OrderedSubjects {
 		subWeight := 1.0
 		sc, hasSubConfig := prep.Config.Subjects[sub.Name]
 		if hasSubConfig {
@@ -950,8 +1046,8 @@ func (c *GradeCalculator) CalculateStatusBreakdown(req model.StatusCalcRequest) 
 	courseSummary := make(model.StatusSummary)
 	var courseMu sync.Mutex
 
-	subjectList := make([]model.SubjectEntity, 0, len(prep.Subjects))
-	for _, s := range prep.Subjects {
+	subjectList := make([]model.SubjectEntity, 0, len(prep.OrderedSubjects))
+	for _, s := range prep.OrderedSubjects {
 		subjectList = append(subjectList, s)
 	}
 

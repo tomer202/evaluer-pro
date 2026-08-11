@@ -22,6 +22,92 @@ type ConfigManager struct {
 	dal        *dal.DAL
 }
 
+type OrderedConfigSequence struct {
+	Subjects  []string
+	Modules   map[string][]string // SubjectName -> []ModuleName
+	Exercises map[string][]string // ModuleName -> []ExerciseName
+}
+
+func (cm *ConfigManager) GetConfigSequence() OrderedConfigSequence {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	seq := OrderedConfigSequence{
+		Subjects:  make([]string, 0),
+		Modules:   make(map[string][]string),
+		Exercises: make(map[string][]string),
+	}
+
+	var yamlData []byte
+	if len(cm.rawYAML) > 0 {
+		yamlData = cm.rawYAML
+	} else {
+		yamlData, _ = yaml.Marshal(cm.active)
+	}
+
+	if len(yamlData) == 0 {
+		return seq
+	}
+
+	var node yaml.Node
+	if err := yaml.Unmarshal(yamlData, &node); err != nil {
+		return seq
+	}
+
+	var rootMap *yaml.Node
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		rootMap = node.Content[0]
+	} else if node.Kind == yaml.MappingNode {
+		rootMap = &node
+	}
+
+	if rootMap == nil || rootMap.Kind != yaml.MappingNode {
+		return seq
+	}
+
+	for i := 0; i < len(rootMap.Content); i += 2 {
+		if rootMap.Content[i].Value == "subjects" && rootMap.Content[i+1].Kind == yaml.MappingNode {
+			subsMap := rootMap.Content[i+1]
+			for sIdx := 0; sIdx < len(subsMap.Content); sIdx += 2 {
+				subName := subsMap.Content[sIdx].Value
+				seq.Subjects = append(seq.Subjects, subName)
+				subNode := subsMap.Content[sIdx+1]
+
+				if subNode.Kind == yaml.MappingNode {
+					for mKeyIdx := 0; mKeyIdx < len(subNode.Content); mKeyIdx += 2 {
+						if subNode.Content[mKeyIdx].Value == "modules" && subNode.Content[mKeyIdx+1].Kind == yaml.MappingNode {
+							modsMap := subNode.Content[mKeyIdx+1]
+							modList := make([]string, 0)
+							for mIdx := 0; mIdx < len(modsMap.Content); mIdx += 2 {
+								modName := modsMap.Content[mIdx].Value
+								modList = append(modList, modName)
+								modNode := modsMap.Content[mIdx+1]
+
+								if modNode.Kind == yaml.MappingNode {
+									for eKeyIdx := 0; eKeyIdx < len(modNode.Content); eKeyIdx += 2 {
+										if modNode.Content[eKeyIdx].Value == "exercises" && modNode.Content[eKeyIdx+1].Kind == yaml.MappingNode {
+											exesMap := modNode.Content[eKeyIdx+1]
+											exList := make([]string, 0)
+											for eIdx := 0; eIdx < len(exesMap.Content); eIdx += 2 {
+												exName := exesMap.Content[eIdx].Value
+												exList = append(exList, exName)
+											}
+											seq.Exercises[modName] = exList
+										}
+									}
+								}
+							}
+							seq.Modules[subName] = modList
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return seq
+}
+
 func NewConfigManager(dalInstance *dal.DAL) *ConfigManager {
 	path := os.Getenv("CONFIG_PATH")
 	if path == "" {
