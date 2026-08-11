@@ -1,6 +1,7 @@
 package dal
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -16,6 +17,22 @@ type DAL struct {
 
 func NewDAL(db *sql.DB) *DAL {
 	return &DAL{db: db}
+}
+
+// IsAlive checks if the Hive PostgreSQL database connection is alive and responsive
+func (d *DAL) IsAlive() bool {
+	if d == nil || d.db == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if err := d.db.PingContext(ctx); err != nil {
+		return false
+	}
+	var result int
+	err := d.db.QueryRowContext(ctx, "SELECT 1").Scan(&result)
+	return err == nil && result == 1
 }
 
 // EnsureIndexes creates optimal composite indexes if they do not exist

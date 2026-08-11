@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"evaluer/internal/config"
 	"evaluer/internal/model"
@@ -19,6 +20,24 @@ func NewAPIHandler(calc *service.GradeCalculator, configMgr *config.ConfigManage
 	return &APIHandler{
 		calc:      calc,
 		configMgr: configMgr,
+	}
+}
+
+// Health Handler
+
+func (h *APIHandler) HealthCheck(c *gin.Context) {
+	if h.calc != nil && h.calc.IsHiveAlive() {
+		c.JSON(http.StatusOK, gin.H{
+			"status":    "healthy",
+			"hive":      "alive",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
+	} else {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":    "unhealthy",
+			"hive":      "unreachable",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
 	}
 }
 

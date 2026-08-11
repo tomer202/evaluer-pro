@@ -2,10 +2,13 @@ package tests
 
 import (
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"evaluer/internal/api"
 	"evaluer/internal/cache"
 	"evaluer/internal/config"
 	"evaluer/internal/model"
@@ -208,5 +211,27 @@ func TestJSONToYAML_SequencePreservation(t *testing.T) {
 
 	if weightIdx > nameIdx {
 		t.Errorf("Expected key 'weight' before 'name', but 'name' appeared first! Output:\n%s", yamlStr)
+	}
+}
+
+func TestHealthCheckRoute(t *testing.T) {
+	cacheMgr := cache.NewCacheManager(nil)
+	cacheMgr.SetCachedData(&cache.CachedData{})
+	configMgr := config.NewConfigManager(nil)
+	calc := service.NewGradeCalculator(cacheMgr, configMgr)
+
+	r := api.SetupRouter(calc, configMgr)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api-health", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200 for /api-health, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, `"hive":"alive"`) && !strings.Contains(body, `"status":"healthy"`) {
+		t.Errorf("Unexpected body for /api-health: %s", body)
 	}
 }

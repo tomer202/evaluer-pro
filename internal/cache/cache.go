@@ -36,6 +36,20 @@ func (cm *CacheManager) SetCachedData(data *CachedData) {
 	cm.testOverride = data
 }
 
+func (cm *CacheManager) IsHiveAlive() bool {
+	cm.mu.RLock()
+	if cm.testOverride != nil {
+		cm.mu.RUnlock()
+		return true
+	}
+	cm.mu.RUnlock()
+
+	if cm.dal == nil {
+		return false
+	}
+	return cm.dal.IsAlive()
+}
+
 func (cm *CacheManager) GetOrFetchData(targetStudents []string) (*CachedData, error) {
 	cm.mu.RLock()
 	if cm.testOverride != nil {

@@ -22,11 +22,16 @@ func SetupRouter(calc *service.GradeCalculator, configMgr *config.ConfigManager)
 
 	handler := NewAPIHandler(calc, configMgr)
 
+	// Health Check Route (/api-health & /health)
+	r.GET("/api-health", handler.HealthCheck)
+	r.GET("/health", handler.HealthCheck)
+
 	// Swagger UI & OpenAPI spec
 	RegisterSwaggerRoutes(r)
 
 	v1 := r.Group("/api/v1")
 	{
+		v1.GET("/health", handler.HealthCheck)
 		// Config Routes
 		configGroup := v1.Group("/config")
 		{

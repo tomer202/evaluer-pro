@@ -40,6 +40,13 @@ func NewGradeCalculator(cacheMgr *cache.CacheManager, configMgr *config.ConfigMa
 	}
 }
 
+func (c *GradeCalculator) IsHiveAlive() bool {
+	if c == nil || c.cacheMgr == nil {
+		return false
+	}
+	return c.cacheMgr.IsHiveAlive()
+}
+
 func getHiveBaseURL() string {
 	url := os.Getenv("HIVE_BASE_URL")
 	if url == "" {

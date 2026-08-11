@@ -20,6 +20,15 @@ const openAPISpecJSON = `{
     }
   ],
   "paths": {
+    "/api-health": {
+      "get": {
+        "summary": "Check Hive LMS database connectivity and platform health",
+        "responses": {
+          "200": { "description": "Hive DB is healthy and responsive" },
+          "503": { "description": "Hive DB is unreachable or down" }
+        }
+      }
+    },
     "/api/v1/config": {
       "get": {
         "summary": "Get active course configuration",
