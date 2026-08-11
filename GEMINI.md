@@ -76,6 +76,20 @@ In PostgreSQL, `assignment_status` is stored as an integer and mapped to string 
 
 ## 3. Core Business Rules & Domain Conventions
 
+### Grade & Score Calculation Rules
+- **Exercise Score Achieved**:
+  $$\text{Exercise Score Achieved} = \frac{\text{raw\_grade}}{100} \times \text{exercise\_config\_score}$$
+  `raw_grade` is 100.0 for `DONE`, parsed from review text for `REDO`/`WORK_IN_PROGRESS`, or 0.0 for `NEW`/unopened.
+- **Module Grade**:
+  $$\text{Module Grade} = \sum_{\text{ex} \in \text{Module}} \text{Exercise Score Achieved} \quad (\text{max } 100.0)$$
+  The sum of exercise scores achieved in a module directly equals the module grade (capped at 100.0).
+- **Subject Grade**:
+  $$\text{Subject Grade} = \frac{\sum_{\text{mod} \in \text{Subject}} (\text{Module Grade}_{\text{mod}} \times \text{module\_weight})}{\sum_{\text{mod} \in \text{Subject}} \text{module\_weight}}$$
+  Calculates the weighted average of module grades across configured modules in the subject.
+- **Course Grade**:
+  $$\text{Course Grade} = \frac{\sum_{\text{sub} \in \text{Course}} (\text{Subject Grade}_{\text{sub}} \times \text{subject\_weight})}{\sum_{\text{sub} \in \text{Course}} \text{subject\_weight}}$$
+  Calculates the weighted average of subject grades across configured subjects in the course.
+
 ### Unopened Exercise Filtering in Grade Calculations
 - **Grade Calculation Routes** (`/calc/exercise`, `/calc/module`, `/calc/subject`, `/calc/course`, `/calc/student`):
   - Exercises that the student has never opened (`assignment is None` / `!hasAssignment`) MUST be **100% excluded** from calculation responses.

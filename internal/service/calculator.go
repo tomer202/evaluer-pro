@@ -375,34 +375,29 @@ func (c *GradeCalculator) CalculateModule(req model.ModuleCalcRequest) (*model.M
 	}
 
 	for _, stu := range prep.Students {
-		userAssMap := prep.UserAssignments[stu.ID]
-
-		exGrades := make([]model.ExerciseGradeInModule, 0)
-		var totalWeightedScore float64
-		var totalMaxScore float64
+		exGrades := make([]model.ExerciseGradeInModule, 0, len(moduleExercises))
+		var moduleGrade float64
 
 		for _, ex := range moduleExercises {
-			maxScore := 100.0
+			exConfigScore := 100.0
 			if sc, ok := prep.Config.Subjects[sub.Name]; ok {
 				if mc, ok := sc.Modules[mod.Name]; ok {
 					if ec, ok := mc.Exercises[ex.Name]; ok {
-						maxScore = ec.Score
+						exConfigScore = ec.Score
 					}
 				}
 			}
 
-			pa, hasAssignment := userAssMap[ex.ID]
-			// Unopened exercise filtering rule: omit exercises student hasn't opened
+			pa, hasAssignment := prep.GetAssignment(stu.ID, ex.ID)
 			if !hasAssignment {
 				continue
 			}
 
 			rawGrade, score, review, status, url, redoCount, isChecked := calculateAssignmentGradeInfo(
-				&pa, stu.ID, sub.ID, mod.ID, ex.ID, maxScore,
+				&pa, stu.ID, sub.ID, mod.ID, ex.ID, exConfigScore,
 			)
 
-			totalWeightedScore += score
-			totalMaxScore += maxScore
+			moduleGrade += score
 
 			exGrades = append(exGrades, model.ExerciseGradeInModule{
 				ExerciseName:  ex.Name,
@@ -416,12 +411,10 @@ func (c *GradeCalculator) CalculateModule(req model.ModuleCalcRequest) (*model.M
 			})
 		}
 
-		moduleGrade := 100.0
-		if totalMaxScore > 0 {
-			moduleGrade = roundToTwoDecimals((totalWeightedScore / totalMaxScore) * 100.0)
-		} else if len(exGrades) == 0 {
-			moduleGrade = 0.0
+		if moduleGrade > 100.0 {
+			moduleGrade = 100.0
 		}
+		moduleGrade = roundToTwoDecimals(moduleGrade)
 
 		resp.Students = append(resp.Students, model.StudentModuleGrade{
 			StudentID:   stu.ID,
@@ -475,15 +468,13 @@ func (c *GradeCalculator) CalculateSubject(req model.SubjectCalcRequest) (*model
 					}
 
 					moduleExercises := prep.ModuleExercises[mod.ID]
-					var totalWeightedScore float64
-					var totalMaxScore float64
-					exCount := 0
+					var mGrade float64
 
 					for _, ex := range moduleExercises {
-						maxScore := 100.0
+						exConfigScore := 100.0
 						if mc, ok := subConfig.Modules[mod.Name]; ok {
 							if ec, ok := mc.Exercises[ex.Name]; ok {
-								maxScore = ec.Score
+								exConfigScore = ec.Score
 							}
 						}
 
@@ -493,22 +484,16 @@ func (c *GradeCalculator) CalculateSubject(req model.SubjectCalcRequest) (*model
 						}
 
 						_, score, _, _, _, _, _ := calculateAssignmentGradeInfo(
-							&pa, s.ID, sub.ID, mod.ID, ex.ID, maxScore,
+							&pa, s.ID, sub.ID, mod.ID, ex.ID, exConfigScore,
 						)
 
-						totalWeightedScore += score
-						totalMaxScore += maxScore
-						exCount++
+						mGrade += score
 					}
 
-					if exCount == 0 {
-						continue
+					if mGrade > 100.0 {
+						mGrade = 100.0
 					}
-
-					mGrade := 0.0
-					if totalMaxScore > 0 {
-						mGrade = roundToTwoDecimals((totalWeightedScore / totalMaxScore) * 100.0)
-					}
+					mGrade = roundToTwoDecimals(mGrade)
 
 					totalWeightedModuleGrade += mGrade * modWeight
 					totalModuleWeight += modWeight
@@ -593,16 +578,14 @@ func (c *GradeCalculator) CalculateCourse(req model.CourseCalcRequest) (*model.C
 						}
 
 						moduleExercises := prep.ModuleExercises[mod.ID]
-						var totalWeightedScore float64
-						var totalMaxScore float64
-						exCount := 0
+						var mGrade float64
 
 						for _, ex := range moduleExercises {
-							maxScore := 100.0
+							exConfigScore := 100.0
 							if hasSubConfig {
 								if mc, ok := sc.Modules[mod.Name]; ok {
 									if ec, ok := mc.Exercises[ex.Name]; ok {
-										maxScore = ec.Score
+										exConfigScore = ec.Score
 									}
 								}
 							}
@@ -613,22 +596,16 @@ func (c *GradeCalculator) CalculateCourse(req model.CourseCalcRequest) (*model.C
 							}
 
 							_, score, _, _, _, _, _ := calculateAssignmentGradeInfo(
-								&pa, s.ID, sub.ID, mod.ID, ex.ID, maxScore,
+								&pa, s.ID, sub.ID, mod.ID, ex.ID, exConfigScore,
 							)
 
-							totalWeightedScore += score
-							totalMaxScore += maxScore
-							exCount++
+							mGrade += score
 						}
 
-						if exCount == 0 {
-							continue
+						if mGrade > 100.0 {
+							mGrade = 100.0
 						}
-
-						mGrade := 0.0
-						if totalMaxScore > 0 {
-							mGrade = roundToTwoDecimals((totalWeightedScore / totalMaxScore) * 100.0)
-						}
+						mGrade = roundToTwoDecimals(mGrade)
 
 						totalWeightedModuleGrade += mGrade * modWeight
 						totalModuleWeight += modWeight
@@ -709,74 +686,68 @@ func (c *GradeCalculator) CalculateStudent(req model.StudentDetailRequest) (*mod
 		var totalWeightedModGrade float64
 		var totalModWeight float64
 
-		for _, mod := range subjectModules {
-			modWeight := 1.0
-			if sc, ok := prep.Config.Subjects[sub.Name]; ok {
-				if mc, ok := sc.Modules[mod.Name]; ok {
-					modWeight = mc.Weight
-				}
-			}
-			if modWeight <= 0 {
-				continue
-			}
-
-			moduleExercises := prep.ModuleExercises[mod.ID]
-			exGrades := make([]model.ExerciseGradeInModule, 0, len(moduleExercises))
-			var totalWeightedExScore float64
-			var totalExMaxScore float64
-
-			for _, ex := range moduleExercises {
-				maxScore := 100.0
+			for _, mod := range subjectModules {
+				modWeight := 1.0
 				if sc, ok := prep.Config.Subjects[sub.Name]; ok {
 					if mc, ok := sc.Modules[mod.Name]; ok {
-						if ec, ok := mc.Exercises[ex.Name]; ok {
-							maxScore = ec.Score
-						}
+						modWeight = mc.Weight
 					}
 				}
-
-				pa, hasAssignment := prep.GetAssignment(stu.ID, ex.ID)
-				if !hasAssignment {
+				if modWeight <= 0 {
 					continue
 				}
 
-				rawGrade, score, review, status, url, redoCount, isChecked := calculateAssignmentGradeInfo(
-					&pa, stu.ID, sub.ID, mod.ID, ex.ID, maxScore,
-				)
+				moduleExercises := prep.ModuleExercises[mod.ID]
+				exGrades := make([]model.ExerciseGradeInModule, 0, len(moduleExercises))
+				var modGrade float64
 
-				totalWeightedExScore += score
-				totalExMaxScore += maxScore
+				for _, ex := range moduleExercises {
+					exConfigScore := 100.0
+					if sc, ok := prep.Config.Subjects[sub.Name]; ok {
+						if mc, ok := sc.Modules[mod.Name]; ok {
+							if ec, ok := mc.Exercises[ex.Name]; ok {
+								exConfigScore = ec.Score
+							}
+						}
+					}
 
-				exGrades = append(exGrades, model.ExerciseGradeInModule{
-					ExerciseName:  ex.Name,
-					RawGrade:      rawGrade,
-					Score:         score,
-					Review:        review,
-					Status:        status,
-					AssignmentURL: url,
-					RedoCount:     redoCount,
-					IsChecked:     isChecked,
+					pa, hasAssignment := prep.GetAssignment(stu.ID, ex.ID)
+					if !hasAssignment {
+						continue
+					}
+
+					rawGrade, score, review, status, url, redoCount, isChecked := calculateAssignmentGradeInfo(
+						&pa, stu.ID, sub.ID, mod.ID, ex.ID, exConfigScore,
+					)
+
+					modGrade += score
+
+					exGrades = append(exGrades, model.ExerciseGradeInModule{
+						ExerciseName:  ex.Name,
+						RawGrade:      rawGrade,
+						Score:         score,
+						Review:        review,
+						Status:        status,
+						AssignmentURL: url,
+						RedoCount:     redoCount,
+						IsChecked:     isChecked,
+					})
+				}
+
+				if modGrade > 100.0 {
+					modGrade = 100.0
+				}
+				modGrade = roundToTwoDecimals(modGrade)
+
+				totalWeightedModGrade += modGrade * modWeight
+				totalModWeight += modWeight
+
+				subModules = append(subModules, model.StudentDetailModuleGrade{
+					ModuleName:  mod.Name,
+					ModuleGrade: modGrade,
+					Exercises:   exGrades,
 				})
 			}
-
-			if len(exGrades) == 0 {
-				continue
-			}
-
-			modGrade := 0.0
-			if totalExMaxScore > 0 {
-				modGrade = roundToTwoDecimals((totalWeightedExScore / totalExMaxScore) * 100.0)
-			}
-
-			totalWeightedModGrade += modGrade * modWeight
-			totalModWeight += modWeight
-
-			subModules = append(subModules, model.StudentDetailModuleGrade{
-				ModuleName:  mod.Name,
-				ModuleGrade: modGrade,
-				Exercises:   exGrades,
-			})
-		}
 
 		if totalModWeight == 0 {
 			continue
@@ -851,16 +822,14 @@ func (c *GradeCalculator) CalculateRecommendations(req model.StudentRecRequest) 
 			}
 
 			moduleExercises := prep.ModuleExercises[mod.ID]
-			var totalWeightedScore float64
-			var totalMaxScore float64
-			exCount := 0
+			var mGrade float64
 
 			for _, ex := range moduleExercises {
-				maxScore := 100.0
+				exConfigScore := 100.0
 				if hasSubConfig {
 					if mc, ok := sc.Modules[mod.Name]; ok {
 						if ec, ok := mc.Exercises[ex.Name]; ok {
-							maxScore = ec.Score
+							exConfigScore = ec.Score
 						}
 					}
 				}
@@ -869,21 +838,15 @@ func (c *GradeCalculator) CalculateRecommendations(req model.StudentRecRequest) 
 					continue
 				}
 				_, score, _, _, _, _, _ := calculateAssignmentGradeInfo(
-					&pa, stu.ID, sub.ID, mod.ID, ex.ID, maxScore,
+					&pa, stu.ID, sub.ID, mod.ID, ex.ID, exConfigScore,
 				)
-				totalWeightedScore += score
-				totalMaxScore += maxScore
-				exCount++
+				mGrade += score
 			}
 
-			if exCount == 0 {
-				continue
+			if mGrade > 100.0 {
+				mGrade = 100.0
 			}
-
-			mGrade := 0.0
-			if totalMaxScore > 0 {
-				mGrade = roundToTwoDecimals((totalWeightedScore / totalMaxScore) * 100.0)
-			}
+			mGrade = roundToTwoDecimals(mGrade)
 
 			totalWeightedModuleGrade += mGrade * modWeight
 			totalModuleWeight += modWeight
