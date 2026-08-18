@@ -63,12 +63,10 @@ func (h *APIHandler) GenerateConfig(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		var cfgObj interface{}
-		_ = json.Unmarshal(jsonBytes, &cfgObj)
 		c.JSON(http.StatusOK, gin.H{
 			"message":     "Config successfully generated and saved to disk",
 			"config_path": h.configMgr.GetConfigPath(),
-			"config":      cfgObj,
+			"config":      json.RawMessage(jsonBytes),
 		})
 	} else {
 		jsonBytes, err := h.configMgr.GenerateSkeletonRawJSON()

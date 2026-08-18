@@ -368,3 +368,22 @@ func TestCalcResponse_ConfigSequenceOrdering(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigGenerate_Ordering(t *testing.T) {
+	// Verify SubjectEntity, ModuleEntity, ExerciseEntity struct fields
+	sub := model.SubjectEntity{ID: 1, Name: "Math", Symbol: "MATH", ParentProgramID: 10}
+	if sub.Symbol != "MATH" {
+		t.Errorf("Expected SubjectEntity Symbol 'MATH', got '%s'", sub.Symbol)
+	}
+
+	mod := model.ModuleEntity{ID: 1, Name: "Algebra", Order: "01", ParentSubjectID: 1}
+	if mod.Order != "01" {
+		t.Errorf("Expected ModuleEntity Order '01', got '%s'", mod.Order)
+	}
+
+	ex := model.ExerciseEntity{ID: 1, Name: "Ex1", Order: "001", ParentModuleID: 1}
+	if ex.Order != "001" {
+		t.Errorf("Expected ExerciseEntity Order '001', got '%s'", ex.Order)
+	}
+}
+

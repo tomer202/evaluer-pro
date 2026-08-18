@@ -70,7 +70,7 @@ func (d *DAL) FetchSubjects() ([]model.SubjectEntity, error) {
 	if d == nil || d.db == nil {
 		return nil, nil
 	}
-	rows, err := d.db.Query("SELECT id, name, parent_program_id FROM course_subject ORDER BY id ASC")
+	rows, err := d.db.Query(`SELECT id, name, COALESCE(symbol, ''), parent_program_id FROM course_subject ORDER BY symbol ASC, id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func (d *DAL) FetchSubjects() ([]model.SubjectEntity, error) {
 	list := make([]model.SubjectEntity, 0)
 	for rows.Next() {
 		var s model.SubjectEntity
-		if err := rows.Scan(&s.ID, &s.Name, &s.ParentProgramID); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Symbol, &s.ParentProgramID); err != nil {
 			return nil, err
 		}
 		list = append(list, s)

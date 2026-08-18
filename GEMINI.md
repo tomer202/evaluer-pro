@@ -117,6 +117,7 @@ In PostgreSQL, `assignment_status` is stored as an integer and mapped to string 
 
 ### JSON to YAML Key & Value Sequence Preservation & Calculation Output Ordering
 - **Config Key & Value Sequence Preservation**: When converting JSON payloads to YAML configurations (`config.ConvertJSONToYAML`), the exact sequence of keys and values MUST be preserved. Map keys and nested objects are decoded into AST nodes (`yaml.Node`) to retain original insertion order without alphabetical re-sorting.
+- **Config Generation Database Ordering**: In `POST /api/v1/config/generate` and `POST /api/v1/config/generate/preview`, the subjects (`course_subject` table) MUST be returned ordered by the `symbol` column (`ORDER BY symbol ASC, id ASC`), while modules (`course_module` table) and exercises (`course_exercise` table) MUST be returned ordered by the `"order"` column (`ORDER BY "order" ASC, id ASC`).
 - **Calculation Response Output Sequence**: All API calculation endpoints (`/calc/exercise`, `/calc/module`, `/calc/subject`, `/calc/course`, `/calc/student`, `/calc/student/recommendations`, `/calc/course/status`) MUST return arrays of subjects, modules, and exercises strictly matching the exact sequence defined in the active `config.yaml` file (or `yaml.Node` AST).
 
 ---
