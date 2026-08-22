@@ -387,3 +387,205 @@ func TestConfigGenerate_Ordering(t *testing.T) {
 	}
 }
 
+func TestStaffGradePersistence_AcrossStudentResubmissions(t *testing.T) {
+	cacheMgr := cache.NewCacheManager(nil)
+	configMgr := config.NewConfigManager(nil)
+
+	configMgr.SetActiveConfig(model.CourseConfig{
+		Subjects: map[string]model.SubjectConfig{
+			"Math": {
+				Name:   "Math",
+				Weight: 1.0,
+				Modules: map[string]model.ModuleConfig{
+					"Algebra": {
+						Name:   "Algebra",
+						Weight: 1.0,
+						Exercises: map[string]model.ExerciseConfig{
+							"Ex1": {Name: "Ex1", Score: 100.0},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	t1 := time.Now().Add(-2 * time.Hour)
+	t2 := time.Now().Add(-1 * time.Hour)
+	t3 := time.Now()
+
+	// Assignment timeline:
+	// 1. t1: Student submits code (SegelOnly = false)
+	// 2. t2: Staff reviews and gives "Grade: 85/100" (SegelOnly = true)
+	// 3. t3: Student re-submits code (SegelOnly = false), setting status to Submitted (3)
+	cacheMgr.SetCachedData(&cache.CachedData{
+		Subjects:  []model.SubjectEntity{{ID: 1, Name: "Math", Symbol: "MATH"}},
+		Modules:   []model.ModuleEntity{{ID: 10, Name: "Algebra", ParentSubjectID: 1}},
+		Exercises: []model.ExerciseEntity{{ID: 100, Name: "Ex1", ParentModuleID: 10}},
+		Students:  []model.UserEntity{{ID: 7, Username: "eve", Clearance: 1}},
+		Assignments: []model.AssignmentEntity{
+			{
+				ID:               500,
+				UserID:           7,
+				ExerciseID:       100,
+				AssignmentStatus: model.AssignmentStatusSubmitted, // Student re-submitted
+				Date:             t3,
+			},
+		},
+		Responses: []model.ResponseEntity{
+			{ID: 1, ThreadID: 500, SegelOnly: false, Date: t1, Content: "First attempt"},
+			{ID: 2, ThreadID: 500, SegelOnly: true, ResponseType: "Redo", Date: t2, Content: "Grade: 85/100. Please fix typo."},
+			{ID: 3, ThreadID: 500, SegelOnly: false, Date: t3, Content: "Fixed typo in code!"},
+		},
+		FetchedAt: t3,
+	})
+
+	calc := service.NewGradeCalculator(cacheMgr, configMgr)
+
+	// 1. Calculate Exercise
+	exResp, err := calc.CalculateExercise(model.ExerciseCalcRequest{
+		SubjectName:  "Math",
+		ModuleName:   "Algebra",
+		ExerciseName: "Ex1",
+		Students:     []string{"eve"},
+	})
+	if err != nil {
+		t.Fatalf("CalculateExercise failed: %v", err)
+	}
+	if len(exResp.Grades) != 1 {
+		t.Fatalf("Expected 1 grade, got %d", len(exResp.Grades))
+	}
+	if exResp.Grades[0].RawGrade != 85.0 {
+		t.Errorf("Expected persisted RawGrade 85.0, got %f", exResp.Grades[0].RawGrade)
+	}
+	if exResp.Grades[0].Score != 85.0 {
+		t.Errorf("Expected Score 85.0, got %f", exResp.Grades[0].Score)
+	}
+	if exResp.Grades[0].IsChecked {
+		t.Errorf("Expected IsChecked to be false due to student re-submission after staff review")
+	}
+
+	// 2. Calculate Student
+	stuResp, err := calc.CalculateStudent(model.StudentDetailRequest{Username: "eve"})
+	if err != nil {
+		t.Fatalf("CalculateStudent failed: %v", err)
+	}
+	if stuResp.TotalGrade != 85.0 {
+		t.Errorf("Expected student TotalGrade 85.0, got %f", stuResp.TotalGrade)
+	}
+}
+
+func TestStudentRedoResubmit_GradePersistence(t *testing.T) {
+	cacheMgr := cache.NewCacheManager(nil)
+	configMgr := config.NewConfigManager(nil)
+
+	configMgr.SetActiveConfig(model.CourseConfig{
+		Subjects: map[string]model.SubjectConfig{
+			"Math": {
+				Name:   "Math",
+				Weight: 1.0,
+				Modules: map[string]model.ModuleConfig{
+					"Algebra": {
+						Name:   "Algebra",
+						Weight: 1.0,
+						Exercises: map[string]model.ExerciseConfig{
+							"Ex1": {Name: "Ex1", Score: 100.0},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	t0 := time.Now().Add(-4 * time.Hour)
+	t1 := time.Now().Add(-3 * time.Hour)
+	t2 := time.Now().Add(-2 * time.Hour)
+	t3 := time.Now().Add(-1 * time.Hour)
+
+	// Step 1: Student submits code, but no staff review yet
+	cacheMgr.SetCachedData(&cache.CachedData{
+		Subjects:  []model.SubjectEntity{{ID: 1, Name: "Math", Symbol: "MATH"}},
+		Modules:   []model.ModuleEntity{{ID: 10, Name: "Algebra", ParentSubjectID: 1}},
+		Exercises: []model.ExerciseEntity{{ID: 100, Name: "Ex1", ParentModuleID: 10}},
+		Students:  []model.UserEntity{{ID: 8, Username: "frank", Clearance: 1}},
+		Assignments: []model.AssignmentEntity{
+			{ID: 600, UserID: 8, ExerciseID: 100, AssignmentStatus: model.AssignmentStatusSubmitted, Date: t0},
+		},
+		Responses: []model.ResponseEntity{
+			{ID: 1, ThreadID: 600, SegelOnly: false, Date: t0, Content: "Initial submission"},
+		},
+		FetchedAt: t0,
+	})
+
+	calc := service.NewGradeCalculator(cacheMgr, configMgr)
+	exResp1, _ := calc.CalculateExercise(model.ExerciseCalcRequest{SubjectName: "Math", ModuleName: "Algebra", ExerciseName: "Ex1", Students: []string{"frank"}})
+	if exResp1.Grades[0].RawGrade != 0.0 {
+		t.Errorf("Step 1: Expected 0.0 before staff review, got %f", exResp1.Grades[0].RawGrade)
+	}
+
+	// Step 2: Staff reviews, gives REDO with "Grade: 70/100"
+	cacheMgr.SetCachedData(&cache.CachedData{
+		Subjects:  []model.SubjectEntity{{ID: 1, Name: "Math", Symbol: "MATH"}},
+		Modules:   []model.ModuleEntity{{ID: 10, Name: "Algebra", ParentSubjectID: 1}},
+		Exercises: []model.ExerciseEntity{{ID: 100, Name: "Ex1", ParentModuleID: 10}},
+		Students:  []model.UserEntity{{ID: 8, Username: "frank", Clearance: 1}},
+		Assignments: []model.AssignmentEntity{
+			{ID: 600, UserID: 8, ExerciseID: 100, AssignmentStatus: model.AssignmentStatusRedo, Date: t1},
+		},
+		Responses: []model.ResponseEntity{
+			{ID: 1, ThreadID: 600, SegelOnly: false, Date: t0, Content: "Initial submission"},
+			{ID: 2, ThreadID: 600, SegelOnly: true, ResponseType: "Redo", Date: t1, Content: "Redo requested. Grade: 70/100"},
+		},
+		FetchedAt: t1,
+	})
+	exResp2, _ := calc.CalculateExercise(model.ExerciseCalcRequest{SubjectName: "Math", ModuleName: "Algebra", ExerciseName: "Ex1", Students: []string{"frank"}})
+	if exResp2.Grades[0].RawGrade != 70.0 {
+		t.Errorf("Step 2: Expected Redo grade 70.0, got %f", exResp2.Grades[0].RawGrade)
+	}
+
+	// Step 3: Student re-submits code (Status = Submitted / Work In Progress)
+	cacheMgr.SetCachedData(&cache.CachedData{
+		Subjects:  []model.SubjectEntity{{ID: 1, Name: "Math", Symbol: "MATH"}},
+		Modules:   []model.ModuleEntity{{ID: 10, Name: "Algebra", ParentSubjectID: 1}},
+		Exercises: []model.ExerciseEntity{{ID: 100, Name: "Ex1", ParentModuleID: 10}},
+		Students:  []model.UserEntity{{ID: 8, Username: "frank", Clearance: 1}},
+		Assignments: []model.AssignmentEntity{
+			{ID: 600, UserID: 8, ExerciseID: 100, AssignmentStatus: model.AssignmentStatusWorkInProgress, Date: t2},
+		},
+		Responses: []model.ResponseEntity{
+			{ID: 1, ThreadID: 600, SegelOnly: false, Date: t0, Content: "Initial submission"},
+			{ID: 2, ThreadID: 600, SegelOnly: true, ResponseType: "Redo", Date: t1, Content: "Redo requested. Grade: 70/100"},
+			{ID: 3, ThreadID: 600, SegelOnly: false, Date: t2, Content: "Updated code attempt 2"},
+		},
+		FetchedAt: t2,
+	})
+	exResp3, _ := calc.CalculateExercise(model.ExerciseCalcRequest{SubjectName: "Math", ModuleName: "Algebra", ExerciseName: "Ex1", Students: []string{"frank"}})
+	if exResp3.Grades[0].RawGrade != 70.0 {
+		t.Errorf("Step 3: Expected persisted grade 70.0 after re-submission, got %f", exResp3.Grades[0].RawGrade)
+	}
+	if exResp3.Grades[0].Score != 70.0 {
+		t.Errorf("Step 3: Expected persisted score 70.0 after re-submission, got %f", exResp3.Grades[0].Score)
+	}
+
+	// Step 4: Staff evaluates again, gives new Redo grade "Grade: 90/100"
+	cacheMgr.SetCachedData(&cache.CachedData{
+		Subjects:  []model.SubjectEntity{{ID: 1, Name: "Math", Symbol: "MATH"}},
+		Modules:   []model.ModuleEntity{{ID: 10, Name: "Algebra", ParentSubjectID: 1}},
+		Exercises: []model.ExerciseEntity{{ID: 100, Name: "Ex1", ParentModuleID: 10}},
+		Students:  []model.UserEntity{{ID: 8, Username: "frank", Clearance: 1}},
+		Assignments: []model.AssignmentEntity{
+			{ID: 600, UserID: 8, ExerciseID: 100, AssignmentStatus: model.AssignmentStatusRedo, Date: t3},
+		},
+		Responses: []model.ResponseEntity{
+			{ID: 1, ThreadID: 600, SegelOnly: false, Date: t0, Content: "Initial submission"},
+			{ID: 2, ThreadID: 600, SegelOnly: true, ResponseType: "Redo", Date: t1, Content: "Redo requested. Grade: 70/100"},
+			{ID: 3, ThreadID: 600, SegelOnly: false, Date: t2, Content: "Updated code attempt 2"},
+			{ID: 4, ThreadID: 600, SegelOnly: true, ResponseType: "Redo", Date: t3, Content: "Much better! Grade: 90/100"},
+		},
+		FetchedAt: t3,
+	})
+	exResp4, _ := calc.CalculateExercise(model.ExerciseCalcRequest{SubjectName: "Math", ModuleName: "Algebra", ExerciseName: "Ex1", Students: []string{"frank"}})
+	if exResp4.Grades[0].RawGrade != 90.0 {
+		t.Errorf("Step 4: Expected new grade 90.0, got %f", exResp4.Grades[0].RawGrade)
+	}
+}
+

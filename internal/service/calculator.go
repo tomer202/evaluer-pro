@@ -55,44 +55,7 @@ func getHiveBaseURL() string {
 	return strings.TrimRight(url, "/")
 }
 
-// ParseGradeFromContent extracts numerical grade from segel review content string
-func ParseGradeFromContent(content string) float64 {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return 0.0
-	}
 
-	lines := strings.Split(content, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-
-		// 1. Check for fraction patterns (e.g., "85/100", "85 out of 100", "85 מתוך 100")
-		if fracMatches := fractionRegex.FindAllStringSubmatch(line, -1); len(fracMatches) > 0 {
-			lastFrac := fracMatches[len(fracMatches)-1]
-			num, err1 := strconv.ParseFloat(lastFrac[1], 64)
-			den, err2 := strconv.ParseFloat(lastFrac[2], 64)
-			if err1 == nil && err2 == nil && den > 0 {
-				calcGrade := (num / den) * 100.0
-				if calcGrade >= 0 && calcGrade <= 100 {
-					return roundToTwoDecimals(calcGrade)
-				}
-			}
-		}
-
-		// 2. Check for single numbers (e.g., "Grade: 85")
-		matches := numberRegex.FindAllString(line, -1)
-		if len(matches) > 0 {
-			for mIdx := len(matches) - 1; mIdx >= 0; mIdx-- {
-				if val, err := strconv.ParseFloat(matches[mIdx], 64); err == nil {
-					if val >= 0 && val <= 100 {
-						return roundToTwoDecimals(val)
-					}
-				}
-			}
-		}
-	}
-	return 0.0
-}
 
 type PreparedAssignment struct {
 	Assignment model.AssignmentEntity
@@ -303,6 +266,51 @@ func (c *GradeCalculator) prepareData(targetStudents []string) (*PreparedData, e
 	return prep, nil
 }
 
+// ParseGradeFromContent extracts numerical grade from segel review content string
+func ParseGradeFromContent(content string) float64 {
+	g, _ := ParseGradeFromContentExt(content)
+	return g
+}
+
+// ParseGradeFromContentExt extracts numerical grade and reports if a valid grade pattern was found
+func ParseGradeFromContentExt(content string) (float64, bool) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return 0.0, false
+	}
+
+	lines := strings.Split(content, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+
+		// 1. Check for fraction patterns (e.g., "85/100", "85 out of 100", "85 מתוך 100")
+		if fracMatches := fractionRegex.FindAllStringSubmatch(line, -1); len(fracMatches) > 0 {
+			lastFrac := fracMatches[len(fracMatches)-1]
+			num, err1 := strconv.ParseFloat(lastFrac[1], 64)
+			den, err2 := strconv.ParseFloat(lastFrac[2], 64)
+			if err1 == nil && err2 == nil && den > 0 {
+				calcGrade := (num / den) * 100.0
+				if calcGrade >= 0 && calcGrade <= 100 {
+					return roundToTwoDecimals(calcGrade), true
+				}
+			}
+		}
+
+		// 2. Check for single numbers (e.g., "Grade: 85")
+		matches := numberRegex.FindAllString(line, -1)
+		if len(matches) > 0 {
+			for mIdx := len(matches) - 1; mIdx >= 0; mIdx-- {
+				if val, err := strconv.ParseFloat(matches[mIdx], 64); err == nil {
+					if val >= 0 && val <= 100 {
+						return roundToTwoDecimals(val), true
+					}
+				}
+			}
+		}
+	}
+	return 0.0, false
+}
+
 func calculateAssignmentGradeInfo(
 	pa *PreparedAssignment,
 	studentID int,
@@ -325,6 +333,8 @@ func calculateAssignmentGradeInfo(
 	var latestStudentDate time.Time
 	var latestSegelDate time.Time
 	hasSegelReview := false
+	var segelGrade float64
+	hasSegelGrade := false
 
 	for _, r := range pa.Responses {
 		if r.SegelOnly {
@@ -337,6 +347,10 @@ func calculateAssignmentGradeInfo(
 			}
 			if r.Content != "" {
 				review = r.Content
+				if g, ok := ParseGradeFromContentExt(r.Content); ok {
+					segelGrade = g
+					hasSegelGrade = true
+				}
 			}
 		} else {
 			if r.Date.After(latestStudentDate) {
@@ -364,15 +378,12 @@ func calculateAssignmentGradeInfo(
 	switch assign.AssignmentStatus {
 	case model.AssignmentStatusDone:
 		rawGrade = 100.0
-	case model.AssignmentStatusRedo, model.AssignmentStatusWorkInProgress:
-		// Extract grade from segel response content
-		if review != "" {
-			rawGrade = ParseGradeFromContent(review)
+	default:
+		if hasSegelGrade {
+			rawGrade = segelGrade
 		} else {
 			rawGrade = 0.0
 		}
-	default:
-		rawGrade = 0.0
 	}
 
 	rawGrade = roundToTwoDecimals(rawGrade)
