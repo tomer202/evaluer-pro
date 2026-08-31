@@ -241,6 +241,35 @@ type CourseCalcResponse struct {
 	Students []StudentCourseGrade `json:"students"`
 }
 
+type ExerciseSummaryGrade struct {
+	ExerciseName  string  `json:"exercise_name"`
+	TotalGrade    float64 `json:"total_grade"`
+	MaxScore      float64 `json:"max_score"`
+	StudentsCount int     `json:"students_count"`
+}
+
+type ModuleSummaryGrade struct {
+	ModuleName    string                 `json:"module_name"`
+	TotalGrade    float64                `json:"total_grade"`
+	Weight        float64                `json:"weight"`
+	StudentsCount int                    `json:"students_count"`
+	Exercises     []ExerciseSummaryGrade `json:"exercises"`
+}
+
+type SubjectSummaryGrade struct {
+	SubjectName   string               `json:"subject_name"`
+	TotalGrade    float64              `json:"total_grade"`
+	Weight        float64              `json:"weight"`
+	StudentsCount int                  `json:"students_count"`
+	Modules       []ModuleSummaryGrade `json:"modules"`
+}
+
+type CourseSummaryCalcResponse struct {
+	TotalGrade    float64               `json:"total_grade"`
+	StudentsCount int                   `json:"students_count"`
+	Subjects      []SubjectSummaryGrade `json:"subjects"`
+}
+
 type StudentDetailRequest struct {
 	Username string `json:"username"`
 }

@@ -1187,3 +1187,177 @@ func (c *GradeCalculator) GetStudents() ([]model.StudentResponse, error) {
 	}
 	return res, nil
 }
+
+func (c *GradeCalculator) CalculateCourseSummary(req model.CourseCalcRequest) (*model.CourseSummaryCalcResponse, error) {
+	prep, err := c.prepareData(req.Students)
+	if err != nil {
+		return nil, err
+	}
+
+	activeConfig := c.configMgr.GetActiveConfig()
+	configSeq := c.configMgr.GetConfigSequence()
+	orderedSubjects := configSeq.Subjects
+
+	numStudents := len(prep.Students)
+	if numStudents == 0 {
+		return &model.CourseSummaryCalcResponse{
+			TotalGrade:    0,
+			StudentsCount: 0,
+			Subjects:      []model.SubjectSummaryGrade{},
+		}, nil
+	}
+
+	studentDetails := make([]*model.StudentDetailResponse, numStudents)
+	for i, stu := range prep.Students {
+		resp, err := c.CalculateStudent(model.StudentDetailRequest{Username: stu.Username})
+		if err == nil {
+			studentDetails[i] = resp
+		}
+	}
+
+	var totalCourseGradeSum float64
+	var validCourseStudentsCount int
+	for _, sd := range studentDetails {
+		if sd != nil {
+			totalCourseGradeSum += sd.TotalGrade
+			validCourseStudentsCount++
+		}
+	}
+	avgCourseGrade := 0.0
+	if validCourseStudentsCount > 0 {
+		avgCourseGrade = roundToTwoDecimals(totalCourseGradeSum / float64(validCourseStudentsCount))
+	}
+
+	subjectSummaries := make([]model.SubjectSummaryGrade, 0, len(orderedSubjects))
+
+	for _, subKey := range orderedSubjects {
+		subCfg, exists := activeConfig.Subjects[subKey]
+		if !exists {
+			continue
+		}
+
+		orderedModules := configSeq.Modules[subKey]
+		moduleSummaries := make([]model.ModuleSummaryGrade, 0, len(orderedModules))
+
+		var subjectGradeSum float64
+		var subjectStudentCount int
+
+		for _, sd := range studentDetails {
+			if sd == nil {
+				continue
+			}
+			for _, sub := range sd.Subjects {
+				if sub.SubjectName == subKey {
+					subjectGradeSum += sub.SubjectGrade
+					subjectStudentCount++
+					break
+				}
+			}
+		}
+
+		avgSubjectGrade := 0.0
+		if subjectStudentCount > 0 {
+			avgSubjectGrade = roundToTwoDecimals(subjectGradeSum / float64(subjectStudentCount))
+		}
+
+		for _, modKey := range orderedModules {
+			modCfg, modExists := subCfg.Modules[modKey]
+			if !modExists {
+				continue
+			}
+
+			orderedExercises := configSeq.Exercises[modKey]
+			exerciseSummaries := make([]model.ExerciseSummaryGrade, 0, len(orderedExercises))
+
+			var moduleGradeSum float64
+			var moduleStudentCount int
+
+			for _, sd := range studentDetails {
+				if sd == nil {
+					continue
+				}
+				for _, sub := range sd.Subjects {
+					if sub.SubjectName == subKey {
+						for _, mod := range sub.Modules {
+							if mod.ModuleName == modKey {
+								moduleGradeSum += mod.ModuleGrade
+								moduleStudentCount++
+								break
+							}
+						}
+					}
+				}
+			}
+
+			avgModuleGrade := 0.0
+			if moduleStudentCount > 0 {
+				avgModuleGrade = roundToTwoDecimals(moduleGradeSum / float64(moduleStudentCount))
+			}
+
+			for _, exKey := range orderedExercises {
+				exCfg, exExists := modCfg.Exercises[exKey]
+				if !exExists {
+					continue
+				}
+
+				var exerciseScoreSum float64
+				var exerciseStudentCount int
+
+				for _, sd := range studentDetails {
+					if sd == nil {
+						continue
+					}
+					for _, sub := range sd.Subjects {
+						if sub.SubjectName == subKey {
+							for _, mod := range sub.Modules {
+								if mod.ModuleName == modKey {
+									for _, ex := range mod.Exercises {
+										if ex.ExerciseName == exKey {
+											exerciseScoreSum += ex.Score
+											exerciseStudentCount++
+											break
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+
+				avgExerciseScore := 0.0
+				if exerciseStudentCount > 0 {
+					avgExerciseScore = roundToTwoDecimals(exerciseScoreSum / float64(exerciseStudentCount))
+				}
+
+				exerciseSummaries = append(exerciseSummaries, model.ExerciseSummaryGrade{
+					ExerciseName:  exKey,
+					TotalGrade:    avgExerciseScore,
+					MaxScore:      exCfg.Score,
+					StudentsCount: exerciseStudentCount,
+				})
+			}
+
+			moduleSummaries = append(moduleSummaries, model.ModuleSummaryGrade{
+				ModuleName:    modKey,
+				TotalGrade:    avgModuleGrade,
+				Weight:        modCfg.Weight,
+				StudentsCount: moduleStudentCount,
+				Exercises:     exerciseSummaries,
+			})
+		}
+
+		subjectSummaries = append(subjectSummaries, model.SubjectSummaryGrade{
+			SubjectName:   subKey,
+			TotalGrade:    avgSubjectGrade,
+			Weight:        subCfg.Weight,
+			StudentsCount: subjectStudentCount,
+			Modules:       moduleSummaries,
+		})
+	}
+
+	return &model.CourseSummaryCalcResponse{
+		TotalGrade:    avgCourseGrade,
+		StudentsCount: validCourseStudentsCount,
+		Subjects:      subjectSummaries,
+	}, nil
+}

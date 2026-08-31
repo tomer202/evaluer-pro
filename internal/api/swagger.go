@@ -187,6 +187,22 @@ const openAPISpecJSON = `{
         "responses": { "200": { "description": "Course calculation grades for students" } }
       }
     },
+    "/api/v1/calc/course/summary": {
+      "post": {
+        "summary": "Calculate aggregated course summary hierarchy (down to exercise level)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "example": {
+                "students": []
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Aggregated course summary tree with subject, module, and exercise averages" } }
+      }
+    },
     "/api/v1/calc/course/status": {
       "post": {
         "summary": "Calculate status summary breakdown",

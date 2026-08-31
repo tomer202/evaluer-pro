@@ -261,3 +261,17 @@ func TestSwaggerOfflineAssets(t *testing.T) {
 		}
 	}
 }
+
+func TestCalcCourseSummary_AuthPermissions(t *testing.T) {
+	_, r := setupTestRouter()
+	adminToken := getAuthToken(t, r, "admin", "QWEqwe123")
+	chiefToken := getAuthToken(t, r, "cheif", "EWQewq321")
+
+	makeReq := func(path string) *http.Request {
+		b, _ := json.Marshal(map[string]interface{}{"students": []string{}})
+		req, _ := http.NewRequest("POST", path, bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		return req
+	}
+
+}

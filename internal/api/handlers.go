@@ -206,6 +206,26 @@ func (h *APIHandler) CalcCourse(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+func (h *APIHandler) CalcCourseSummary(c *gin.Context) {
+	var req model.CourseCalcRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := checkCourseSummaryPermission(c); err != nil {
+		return
+	}
+
+	res, err := h.calc.CalculateCourseSummary(req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
+}
+
 func (h *APIHandler) CalcCourseStatus(c *gin.Context) {
 	var req model.StatusCalcRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

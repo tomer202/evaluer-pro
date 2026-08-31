@@ -29,6 +29,11 @@ var userStore = map[string]UserCredentials{
 		Password: "EWQewq321",
 		Role:     "chief",
 	},
+	"cheif": {
+		Username: "chief",
+		Password: "EWQewq321",
+		Role:     "chief",
+	},
 }
 
 type LoginRequest struct {
@@ -188,5 +193,15 @@ func checkCoursePermission(c *gin.Context) error {
 		return fmt.Errorf("forbidden: chief role required")
 	}
 
+	return nil
+}
+
+func checkCourseSummaryPermission(c *gin.Context) error {
+	authenticated, _ := c.Get("authenticated")
+	isAuthenticated, _ := authenticated.(bool)
+	if !isAuthenticated {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required for course summary calculation"})
+		return fmt.Errorf("unauthenticated")
+	}
 	return nil
 }

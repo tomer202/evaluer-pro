@@ -126,6 +126,7 @@ In PostgreSQL, `assignment_status` is stored as an integer and mapped to string 
   - **Public / Unauthenticated**: `/health`, `/api-health`, `/api/v1/health`, `/api/v1/students` (`GET`, returns active student list excluding `IGNORED_USERNAMES`), `/api/v1/config` (`GET`, `PUT`, `PATCH`), `/api/v1/config/generate`, `/api/v1/config/generate/preview`, `/api/v1/calc/course/status`, `/api/v1/calc/student`, `/api/v1/calc/student/recommendations`.
   - **`/api/v1/calc/exercise`**, **`/api/v1/calc/module`**, **`/api/v1/calc/subject`**: Requires authentication (`401 Unauthorized` if missing). `chief` role is allowed for any student selection. `admin` role is restricted to specifying between 1 and 5 target students in the request payload (`403 Forbidden` if 0 or >5 students).
   - **`/api/v1/calc/course`**: Requires authentication. Allowed ONLY for `chief` role (`403 Forbidden` for `admin` role).
+  - **`/api/v1/calc/course/summary`**: Requires authentication (`401 Unauthorized` if missing). Allowed for any authenticated user (`admin` or `chief`). Returns aggregated course summary hierarchy drilled down to exercise level.
 
 ### JSON to YAML Key & Value Sequence Preservation & Calculation Output Ordering
 - **Config Key & Value Sequence Preservation**: When converting JSON payloads to YAML configurations (`config.ConvertJSONToYAML`), the exact sequence of keys and values MUST be preserved. Map keys and nested objects are decoded into AST nodes (`yaml.Node`) to retain original insertion order without alphabetical re-sorting.
