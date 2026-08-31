@@ -1,10 +1,14 @@
 package api
 
 import (
+	"embed"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
+
+//go:embed static/*
+var swaggerStaticFS embed.FS
 
 const openAPISpecJSON = `{
   "openapi": "3.0.3",
@@ -19,10 +23,56 @@ const openAPISpecJSON = `{
       "description": "Local Development Server"
     }
   ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter your JWT token obtained from /api/v1/login"
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
   "paths": {
+    "/api/v1/login": {
+      "post": {
+        "summary": "Authenticate user and issue JWT Bearer token",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "example": {
+                "username": "admin",
+                "password": "QWEqwe123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "JWT token response" },
+          "401": { "description": "Invalid credentials" }
+        }
+      }
+    },
+    "/api/v1/students": {
+      "get": {
+        "summary": "Get list of all active students (excluding IGNORED_USERNAMES)",
+        "security": [],
+        "responses": {
+          "200": { "description": "Array of student objects containing student_id, username, first_name, last_name" }
+        }
+      }
+    },
     "/api-health": {
       "get": {
         "summary": "Check Hive LMS database connectivity and platform health",
+        "security": [],
         "responses": {
           "200": { "description": "Hive DB is healthy and responsive" },
           "503": { "description": "Hive DB is unreachable or down" }
@@ -194,7 +244,7 @@ const swaggerUIHTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <title>Evaluer REST API - Swagger UI</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <link rel="stylesheet" href="/swagger-assets/swagger-ui.css" />
   <style>
     html { box-sizing: border-box; overflow: -moz-scrollbars-vertical; overflow-y: scroll; }
     *, *:before, *:after { box-sizing: inherit; }
@@ -203,8 +253,8 @@ const swaggerUIHTML = `<!DOCTYPE html>
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" charset="UTF-8"></script>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js" charset="UTF-8"></script>
+  <script src="/swagger-assets/swagger-ui-bundle.js" charset="UTF-8"></script>
+  <script src="/swagger-assets/swagger-ui-standalone-preset.js" charset="UTF-8"></script>
   <script>
     window.onload = function() {
       window.ui = SwaggerUIBundle({
@@ -226,6 +276,33 @@ const swaggerUIHTML = `<!DOCTYPE html>
 </html>`
 
 func RegisterSwaggerRoutes(r *gin.Engine) {
+	r.GET("/swagger-assets/swagger-ui.css", func(c *gin.Context) {
+		data, err := swaggerStaticFS.ReadFile("static/swagger-ui.css")
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Data(http.StatusOK, "text/css; charset=utf-8", data)
+	})
+
+	r.GET("/swagger-assets/swagger-ui-bundle.js", func(c *gin.Context) {
+		data, err := swaggerStaticFS.ReadFile("static/swagger-ui-bundle.js")
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Data(http.StatusOK, "application/javascript; charset=utf-8", data)
+	})
+
+	r.GET("/swagger-assets/swagger-ui-standalone-preset.js", func(c *gin.Context) {
+		data, err := swaggerStaticFS.ReadFile("static/swagger-ui-standalone-preset.js")
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Data(http.StatusOK, "application/javascript; charset=utf-8", data)
+	})
+
 	r.GET("/openapi.json", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")
 		c.String(http.StatusOK, openAPISpecJSON)

@@ -83,6 +83,13 @@ type UserEntity struct {
 	Clearance int    `db:"clearance" json:"clearance"`
 }
 
+type StudentResponse struct {
+	StudentID int    `json:"student_id"`
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+}
+
 type AssignmentEntity struct {
 	ID               int       `db:"id" json:"id"`
 	Date             time.Time `db:"date" json:"date"`

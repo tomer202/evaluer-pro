@@ -20,7 +20,14 @@ func SetupRouter(calc *service.GradeCalculator, configMgr *config.ConfigManager)
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 	r.Use(cors.New(corsConfig))
 
+	// Attach JWT Auth Middleware globally
+	r.Use(JWTAuthMiddleware())
+
 	handler := NewAPIHandler(calc, configMgr)
+
+	// Login Routes (/login, /v1/login, /api/v1/login)
+	r.POST("/login", handler.Login)
+	r.POST("/v1/login", handler.Login)
 
 	// Health Check Route (/api-health & /health)
 	r.GET("/api-health", handler.HealthCheck)
@@ -31,7 +38,9 @@ func SetupRouter(calc *service.GradeCalculator, configMgr *config.ConfigManager)
 
 	v1 := r.Group("/api/v1")
 	{
+		v1.POST("/login", handler.Login)
 		v1.GET("/health", handler.HealthCheck)
+		v1.GET("/students", handler.GetStudents)
 		// Config Routes
 		configGroup := v1.Group("/config")
 		{

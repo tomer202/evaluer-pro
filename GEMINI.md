@@ -15,6 +15,7 @@ This document outlines the core architecture, design patterns, business rules, A
 - **`cmd/server/main.go`**: Go application entry point. Loads configuration, initializes PostgreSQL database connection pool (`db.InitDB()`), sets up Gin HTTP routes, and starts the HTTP server.
 - **`internal/api/`**:
   - `handlers.go`: Gin HTTP handlers for configuration management and grade calculations.
+  - `auth.go`: JWT authentication token generator, validator, login handler, and route permission checkers.
   - `router.go`: HTTP routing table, CORS preflight middleware, and OPTIONS request handlers.
   - `swagger.go`: OpenAPI 3.0 JSON specification handler and embedded Swagger UI documentation (`/docs`).
 - **`internal/dal/dal.go`**: Database Abstraction Layer (DAL). Executes optimized, indexed SQL queries against PostgreSQL concurrently, supporting target student SQL filtering (`WHERE user_id IN (...)`).
@@ -115,6 +116,16 @@ In PostgreSQL, `assignment_status` is stored as an integer and mapped to string 
   - **`REDO_UNCHECKED`**: `status == REDO` and `not is_checked`.
   - **`WIP_UNCHECKED`**: `status == WORK_IN_PROGRESS` and `not is_checked`.
 - **Unopened exercises** (`!hasAssignment`) are strictly excluded from status breakdown counters.
+
+### JWT Authentication & Authorization Matrix
+- **Login Routes**: `POST /api/v1/login`, `POST /v1/login`, `POST /login` accepts `{ "username": "...", "password": "..." }` and issues a Bearer JWT token valid for 24 hours.
+- **Hardcoded User Store**:
+  - `admin` / `QWEqwe123` (Role: `admin`)
+  - `chief` / `EWQewq321` (Role: `chief`)
+- **Route Access Matrix**:
+  - **Public / Unauthenticated**: `/health`, `/api-health`, `/api/v1/health`, `/api/v1/students` (`GET`, returns active student list excluding `IGNORED_USERNAMES`), `/api/v1/config` (`GET`, `PUT`, `PATCH`), `/api/v1/config/generate`, `/api/v1/config/generate/preview`, `/api/v1/calc/course/status`, `/api/v1/calc/student`, `/api/v1/calc/student/recommendations`.
+  - **`/api/v1/calc/exercise`**, **`/api/v1/calc/module`**, **`/api/v1/calc/subject`**: Requires authentication (`401 Unauthorized` if missing). `chief` role is allowed for any student selection. `admin` role is restricted to specifying between 1 and 5 target students in the request payload (`403 Forbidden` if 0 or >5 students).
+  - **`/api/v1/calc/course`**: Requires authentication. Allowed ONLY for `chief` role (`403 Forbidden` for `admin` role).
 
 ### JSON to YAML Key & Value Sequence Preservation & Calculation Output Ordering
 - **Config Key & Value Sequence Preservation**: When converting JSON payloads to YAML configurations (`config.ConvertJSONToYAML`), the exact sequence of keys and values MUST be preserved. Map keys and nested objects are decoded into AST nodes (`yaml.Node`) to retain original insertion order without alphabetical re-sorting.

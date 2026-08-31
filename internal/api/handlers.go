@@ -133,6 +133,10 @@ func (h *APIHandler) CalcExercise(c *gin.Context) {
 		return
 	}
 
+	if err := checkCalcPermission(c, req.Students); err != nil {
+		return
+	}
+
 	res, err := h.calc.CalculateExercise(req)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -146,6 +150,10 @@ func (h *APIHandler) CalcModule(c *gin.Context) {
 	var req model.ModuleCalcRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := checkCalcPermission(c, req.Students); err != nil {
 		return
 	}
 
@@ -165,6 +173,10 @@ func (h *APIHandler) CalcSubject(c *gin.Context) {
 		return
 	}
 
+	if err := checkCalcPermission(c, req.Students); err != nil {
+		return
+	}
+
 	res, err := h.calc.CalculateSubject(req)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -178,6 +190,10 @@ func (h *APIHandler) CalcCourse(c *gin.Context) {
 	var req model.CourseCalcRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := checkCoursePermission(c); err != nil {
 		return
 	}
 
@@ -236,4 +252,13 @@ func (h *APIHandler) CalcStudentRecommendations(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, res)
+}
+
+func (h *APIHandler) GetStudents(c *gin.Context) {
+	students, err := h.calc.GetStudents()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, students)
 }

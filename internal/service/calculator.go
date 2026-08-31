@@ -1170,3 +1170,20 @@ func (c *GradeCalculator) CalculateStatusBreakdown(req model.StatusCalcRequest) 
 		Subjects: subjectSummaries,
 	}, nil
 }
+
+func (c *GradeCalculator) GetStudents() ([]model.StudentResponse, error) {
+	cd, err := c.cacheMgr.GetOrFetchData(nil)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]model.StudentResponse, 0, len(cd.Students))
+	for _, s := range cd.Students {
+		res = append(res, model.StudentResponse{
+			StudentID: s.ID,
+			Username:  s.Username,
+			FirstName: s.FirstName,
+			LastName:  s.LastName,
+		})
+	}
+	return res, nil
+}
