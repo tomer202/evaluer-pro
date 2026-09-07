@@ -336,14 +336,23 @@ func calculateAssignmentGradeInfo(
 	var segelGrade float64
 	hasSegelGrade := false
 
+	seenRedoIDs := make(map[int]bool)
 	for _, r := range pa.Responses {
-		if r.SegelOnly {
+		if !r.SegelOnly {
+			normalizedType := strings.TrimSpace(r.ResponseType)
+			if strings.EqualFold(normalizedType, "Redo") {
+				if !seenRedoIDs[r.ID] {
+					seenRedoIDs[r.ID] = true
+					redoCount++
+				}
+			}
+			if r.Date.After(latestStudentDate) {
+				latestStudentDate = r.Date
+			}
+		} else {
 			hasSegelReview = true
 			if r.Date.After(latestSegelDate) {
 				latestSegelDate = r.Date
-			}
-			if strings.EqualFold(r.ResponseType, "Redo") || strings.EqualFold(r.ResponseType, "REDO") {
-				redoCount++
 			}
 			if r.Content != "" {
 				review = r.Content
@@ -351,10 +360,6 @@ func calculateAssignmentGradeInfo(
 					segelGrade = g
 					hasSegelGrade = true
 				}
-			}
-		} else {
-			if r.Date.After(latestStudentDate) {
-				latestStudentDate = r.Date
 			}
 		}
 	}

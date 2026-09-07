@@ -105,7 +105,7 @@ In PostgreSQL, `assignment_status` is stored as an integer and mapped to string 
 ### Staff Evaluation Tracking (`redo_count`, `is_checked` & Grade Persistence)
 - Each assignment with final status `REDO`, `WORK_IN_PROGRESS`, or `DONE` must be graded. Assignments with status `DONE` default to 100%. `REDO` and `WORK_IN_PROGRESS` grades are given in a `segel_only == True` response, where text comments are parsed for numeric grades via `ParseGradeFromContent`.
 - **Staff Grade Persistence**: When a student receives a grade from staff (`segel_only == True`), that grade MUST persist and continue to be calculated in exercise score, module grade, subject grade, and course grade even if the student subsequently re-submits code or updates the assignment status (e.g. `SUBMITTED`, `WORK_IN_PROGRESS`, `REDO`, `AUTO_CHECKED`). The staff-assigned grade remains active until staff evaluates the submission again and provides a NEW grade (or status becomes `DONE`, which defaults to 100.0).
-- **`redo_count`**: Dynamically counts staff REDO evaluation responses (`segel_only == True` and `response_type == "Redo"`) from assignment response history.
+- **`redo_count`**: Dynamically counts Redo evaluation responses (`segel_only == False` and `response_type == "Redo"`) from assignment response history, deduplicated by response ID.
 - **`is_checked`**:
   - `True`: Assignment status is `DONE` (`5`), assignment status is `NEW` (`0`), or latest staff review date $\ge$ latest student submission date.
   - `False`: Student submitted/resubmitted code after the last staff review on an active submission (`REDO`, `WORK_IN_PROGRESS`, `SUBMITTED`), or staff has not reviewed the submission yet.

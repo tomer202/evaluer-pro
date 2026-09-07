@@ -15,6 +15,30 @@ import (
 	"evaluer/internal/service"
 )
 
+func setupMockCalculator() (*cache.CacheManager, *config.ConfigManager, *service.GradeCalculator) {
+	cacheMgr := cache.NewCacheManager(nil)
+	configMgr := config.NewConfigManager(nil)
+	configMgr.SetActiveConfig(model.CourseConfig{
+		Subjects: map[string]model.SubjectConfig{
+			"Math": {
+				Name:   "Math",
+				Weight: 1.0,
+				Modules: map[string]model.ModuleConfig{
+					"Algebra": {
+						Name:   "Algebra",
+						Weight: 1.0,
+						Exercises: map[string]model.ExerciseConfig{
+							"Ex1": {Name: "Ex1", Score: 100.0},
+						},
+					},
+				},
+			},
+		},
+	})
+	calc := service.NewGradeCalculator(cacheMgr, configMgr)
+	return cacheMgr, configMgr, calc
+}
+
 func TestParseGradeFromContent_FractionCases(t *testing.T) {
 	cases := []struct {
 		content  string
@@ -586,6 +610,50 @@ func TestStudentRedoResubmit_GradePersistence(t *testing.T) {
 	exResp4, _ := calc.CalculateExercise(model.ExerciseCalcRequest{SubjectName: "Math", ModuleName: "Algebra", ExerciseName: "Ex1", Students: []string{"frank"}})
 	if exResp4.Grades[0].RawGrade != 90.0 {
 		t.Errorf("Step 4: Expected new grade 90.0, got %f", exResp4.Grades[0].RawGrade)
+	}
+}
+
+func TestRedoCount_SegelOnlyFalseFiltering(t *testing.T) {
+	cacheMgr, _, calc := setupMockCalculator()
+	now := time.Now()
+
+	cacheMgr.SetCachedData(&cache.CachedData{
+		Subjects:  []model.SubjectEntity{{ID: 1, Name: "Math", Symbol: "MATH"}},
+		Modules:   []model.ModuleEntity{{ID: 10, Name: "Algebra", ParentSubjectID: 1}},
+		Exercises: []model.ExerciseEntity{{ID: 100, Name: "Ex1", ParentModuleID: 10}},
+		Students:  []model.UserEntity{{ID: 9, Username: "george", Clearance: 1}},
+		Assignments: []model.AssignmentEntity{
+			{ID: 700, UserID: 9, ExerciseID: 100, AssignmentStatus: model.AssignmentStatusRedo, Date: now},
+		},
+		Responses: []model.ResponseEntity{
+			// SegelOnly = false Redo responses (SHOULD be counted)
+			{ID: 10, ThreadID: 700, SegelOnly: false, ResponseType: "Redo", Date: now.Add(-3 * time.Hour), Content: "Redo 1"},
+			{ID: 10, ThreadID: 700, SegelOnly: false, ResponseType: "Redo", Date: now.Add(-3 * time.Hour), Content: "Redo 1 duplicate SQL JOIN row"}, // Duplicate ID
+			{ID: 11, ThreadID: 700, SegelOnly: false, ResponseType: " Redo ", Date: now.Add(-2 * time.Hour), Content: "Redo 2 with space"},
+
+			// SegelOnly = true Redo responses (SHOULD NOT be counted)
+			{ID: 12, ThreadID: 700, SegelOnly: true, ResponseType: "Redo", Date: now.Add(-1 * time.Hour), Content: "Segel staff review grade: 70/100"},
+		},
+		FetchedAt: now,
+	})
+
+	exResp, err := calc.CalculateExercise(model.ExerciseCalcRequest{
+		SubjectName:  "Math",
+		ModuleName:   "Algebra",
+		ExerciseName: "Ex1",
+		Students:     []string{"george"},
+	})
+	if err != nil {
+		t.Fatalf("Failed to calculate exercise: %v", err)
+	}
+
+	if len(exResp.Grades) == 0 {
+		t.Fatalf("Expected grade response for george")
+	}
+
+	// Should count 2 distinct SegelOnly=false Redo responses (IDs 10 and 11)
+	if exResp.Grades[0].RedoCount != 2 {
+		t.Errorf("Expected RedoCount = 2 (counting SegelOnly=false with deduplication), got %d", exResp.Grades[0].RedoCount)
 	}
 }
 

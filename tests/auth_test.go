@@ -265,7 +265,7 @@ func TestSwaggerOfflineAssets(t *testing.T) {
 func TestCalcCourseSummary_AuthPermissions(t *testing.T) {
 	_, r := setupTestRouter()
 	adminToken := getAuthToken(t, r, "admin", "QWEqwe123")
-	chiefToken := getAuthToken(t, r, "cheif", "EWQewq321")
+	chiefToken := getAuthToken(t, r, "chief", "EWQewq321")
 
 	makeReq := func(path string) *http.Request {
 		b, _ := json.Marshal(map[string]interface{}{"students": []string{}})
@@ -274,4 +274,39 @@ func TestCalcCourseSummary_AuthPermissions(t *testing.T) {
 		return req
 	}
 
+	for _, path := range []string{"/api/v1/calc/course/summary"} {
+		// 1. Unauthenticated -> 401 Unauthorized
+		req1 := makeReq(path)
+		w1 := httptest.NewRecorder()
+		r.ServeHTTP(w1, req1)
+		if w1.Code != http.StatusUnauthorized {
+			t.Errorf("Expected 401 for unauthenticated %s, got %d", path, w1.Code)
+		}
+
+		// 2. Admin user -> 200 OK
+		req2 := makeReq(path)
+		req2.Header.Set("Authorization", "Bearer "+adminToken)
+		w2 := httptest.NewRecorder()
+		r.ServeHTTP(w2, req2)
+		if w2.Code != http.StatusOK {
+			t.Errorf("Expected 200 for admin on %s, got %d", path, w2.Code)
+		}
+
+		// 3. Chief user -> 200 OK
+		req3 := makeReq(path)
+		req3.Header.Set("Authorization", "Bearer "+chiefToken)
+		w3 := httptest.NewRecorder()
+		r.ServeHTTP(w3, req3)
+		if w3.Code != http.StatusOK {
+			t.Errorf("Expected 200 for chief on %s, got %d", path, w3.Code)
+		}
+
+		var resp model.CourseSummaryCalcResponse
+		if err := json.Unmarshal(w3.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("Failed to unmarshal response for %s: %v", path, err)
+		}
+		if len(resp.Subjects) != 1 {
+			t.Errorf("Expected 1 subject in summary response, got %d", len(resp.Subjects))
+		}
+	}
 }
